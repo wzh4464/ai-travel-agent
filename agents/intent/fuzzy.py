@@ -107,12 +107,17 @@ def interpret_price_preference(text: str) -> Optional[dict]:
         return None
     s = text.lower()
 
-    # explicit number: "under $500", "500 美元以内", "<= 800"
-    m = re.search(r'(?:under|below|<=?|以内|以下)\s*\$?(\d+)', s)
+    # Price-first phrases: "500美元以内", "800元以下", "$500 or less"
+    m = re.search(r'\$?(\d+)\s*(?:美元|元|块|rmb|usd)?\s*(?:以内|以下|左右|or less)', s)
     if m:
         return {'max_price': float(m.group(1))}
-    m = re.search(r'\$(\d+)\s*(?:or less|左右|以内|以下)?', s)
-    if m and ('under' in s or 'cheap' in s or 'less' in s or '以内' in s or '以下' in s):
+    # Keyword-first phrases: "under $500", "below 800", "<= 800"
+    m = re.search(r'(?:under|below|<=?)\s*\$?(\d+)', s)
+    if m:
+        return {'max_price': float(m.group(1))}
+    # "$500 ... cheap" — dollar amount with a cheap/less hint nearby
+    m = re.search(r'\$(\d+)', s)
+    if m and ('cheap' in s or 'less' in s):
         return {'max_price': float(m.group(1))}
 
     if any(k in s for k in ('cheap', 'cheapest', 'low cost', 'budget', '便宜', '最便宜', '经济')):

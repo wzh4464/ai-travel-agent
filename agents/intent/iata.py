@@ -91,13 +91,23 @@ CJK_ALIASES: dict[str, str] = {
 def lookup(city_name: str) -> list[str]:
     """Return IATA codes for ``city_name`` (empty list when unknown)."""
     key = (city_name or '').strip().lower()
+    if not key:
+        return []
     if key in CJK_ALIASES:
         key = CJK_ALIASES[key]
     if key in CITY_TO_IATA:
         return CITY_TO_IATA[key]
     if len(key) == 3 and key.isalpha():
         return [key.upper()]
-    for name, codes in CITY_TO_IATA.items():
-        if key and key in name:
-            return codes
+    # Substring fallback in both directions:
+    #   * ``name in key``  — user wrote "london heathrow", match "london"
+    #   * ``key in name``  — user wrote "lon", match "london"
+    # Prefer the longer known name to disambiguate "san fran" vs "san".
+    candidates = [
+        (name, codes) for name, codes in CITY_TO_IATA.items()
+        if name in key or key in name
+    ]
+    if candidates:
+        candidates.sort(key=lambda item: -len(item[0]))
+        return candidates[0][1]
     return []

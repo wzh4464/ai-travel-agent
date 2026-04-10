@@ -35,6 +35,26 @@ class TravelIntent:
         return asdict(self)
 
 
+_DEFAULTS = {
+    'cabin_class': 'economy',
+    'adults': 1,
+    'children': 0,
+}
+
+
+def _is_unset(key: str, value) -> bool:
+    """Return True when a slot value should be treated as 'not yet provided'.
+
+    ``max_stops`` is deliberately excluded from the defaults table so that
+    ``0`` (non-stop) is treated as a real user preference, not as "empty".
+    """
+    if value is None or value == '':
+        return True
+    if key in _DEFAULTS and value == _DEFAULTS[key]:
+        return True
+    return False
+
+
 @dataclass
 class DialogState:
     """Tracks accumulated intent across turns in a single conversation thread."""
@@ -43,13 +63,18 @@ class DialogState:
     clarifications_asked: list[str] = field(default_factory=list)
 
     def merge(self, new: TravelIntent) -> None:
-        """Fill in any fields on the tracked intent that the new turn resolved."""
+        """Fill in any fields on the tracked intent that the new turn resolved.
+
+        A value from ``new`` replaces the tracked value only when the
+        tracked slot is still unset. This preserves earlier turns: if the
+        user said "2026-05-01" on turn 1, a later turn that omits a date
+        will not clobber it.
+        """
         for key, value in new.as_dict().items():
-            if value in (None, 0, '', 'economy'):
+            if _is_unset(key, value):
                 continue
-            # 0 is a valid value for max_stops (non-stop), handle explicitly
             current = getattr(self.intent, key)
-            if current in (None, 0, '', 'economy') or key == 'max_stops':
+            if _is_unset(key, current):
                 setattr(self.intent, key, value)
 
 
@@ -73,7 +98,30 @@ def clarification_question(slot: str) -> str:
 # Heuristic extraction
 # ---------------------------------------------------------------------------
 
-_FROM_TO_EN = re.compile(r'from\s+([\w\s]+?)\s+to\s+([\w\s]+?)(?:\s+on|\s+in|\s+next|\s+this|\s+for|[,.?!]|$)', re.I)
+# The terminator clause lists every word that should *end* a city name
+# capture. Anything placed here will not be accidentally glued onto the city,
+# e.g. "to Tokyo direct on 2026-05-01" would otherwise capture "Tokyo direct".
+_TERMINATORS = (
+    r'on|in|next|this|for|direct|non-?stop|nonstop|cheap|cheapest|'
+    r'business|economy|first|premium|with|via|by'
+)
+_FROM_TO_EN = re.compile(
+    r'from\s+([A-Za-z ]+?)\s+to\s+([A-Za-z ]+?)'
+    rf'(?:\s+(?:{_TERMINATORS})\b|[,.?!]|$)',
+    re.I,
+)
+# Origin-only: "from Beijing next weekend", "leaving from SFO tomorrow".
+_FROM_ONLY_EN = re.compile(
+    r'(?:^|\s)from\s+([A-Za-z ]+?)'
+    rf'(?:\s+(?:to|{_TERMINATORS})\b|[,.?!]|$)',
+    re.I,
+)
+# Destination-only: "fly to Tokyo", "heading to LHR", "I want to go to Paris".
+_TO_ONLY_EN = re.compile(
+    r'(?:^|\s)(?:fly|go|travel|head(?:ing)?)\s+to\s+([A-Za-z ]+?)'
+    rf'(?:\s+(?:{_TERMINATORS})\b|[,.?!]|$)',
+    re.I,
+)
 _FROM_TO_CN = re.compile(r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:到|飞)\s*([\u4e00-\u9fa5A-Za-z ]+?)(?:\s|，|。|$)')
 _ADULTS_EN = re.compile(r'(\d+)\s+(?:adult|passenger|people|pax)', re.I)
 _ADULTS_CN = re.compile(r'(\d+)\s*(?:人|名乘客|位)')
@@ -86,11 +134,22 @@ _CABIN_WORDS = {
 
 
 def _extract_pair(text: str) -> tuple[Optional[str], Optional[str]]:
+    # First try the full from→to pair (either language).
     for pattern in (_FROM_TO_EN, _FROM_TO_CN):
         m = pattern.search(text)
         if m:
             return m.group(1).strip(), m.group(2).strip()
-    return None, None
+    # Fall back to "from X" and "to X" in isolation. Either or both may
+    # match a single turn ("fly to Tokyo" / "from Beijing next weekend").
+    origin: Optional[str] = None
+    destination: Optional[str] = None
+    m = _FROM_ONLY_EN.search(text)
+    if m:
+        origin = m.group(1).strip()
+    m = _TO_ONLY_EN.search(text)
+    if m:
+        destination = m.group(1).strip()
+    return origin, destination
 
 
 def _extract_cabin(text: str) -> str:

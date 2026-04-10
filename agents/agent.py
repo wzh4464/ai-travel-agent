@@ -1,9 +1,10 @@
 # pylint: disable = http-used,print-used,no-self-use
 
 import datetime
+import logging
 import operator
 import os
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
@@ -20,7 +21,10 @@ from agents.intent import (
     extract_intent,
     missing_slots,
 )
+from agents.privacy import scrub, scrub_mapping
 from agents.tools import ALL_TOOLS
+
+logger = logging.getLogger(__name__)
 
 _ = load_dotenv()
 
@@ -100,9 +104,24 @@ Expected Output:
 
 class Agent:
 
-    def __init__(self):
+    def __init__(self, llm: Any = None, email_llm: Any = None):
+        """Construct the agent graph.
+
+        Parameters
+        ----------
+        llm:
+            Optional chat model (already bound to ``TOOLS`` or not). When
+            ``None`` a default ``ChatOpenAI('gpt-4o')`` is created. Tests
+            inject a deterministic fake here to avoid real LLM calls.
+        email_llm:
+            Optional chat model used by the email-sender node.
+        """
         self._tools = {t.name: t for t in TOOLS}
-        self._tools_llm = ChatOpenAI(model='gpt-4o').bind_tools(TOOLS)
+        if llm is None:
+            self._tools_llm = ChatOpenAI(model='gpt-4o').bind_tools(TOOLS)
+        else:
+            self._tools_llm = llm if hasattr(llm, 'invoke') else llm.bind_tools(TOOLS)
+        self._email_llm = email_llm
 
         builder = StateGraph(AgentState)
         builder.add_node('parse_intent', self.parse_intent)
@@ -175,14 +194,14 @@ class Agent:
         return 'more_tools'
 
     def email_sender(self, state: AgentState):
-        print('Sending email')
-        email_llm = ChatOpenAI(model='gpt-4o', temperature=0.1)
+        logger.info('email_sender: preparing HTML email')
+        email_llm = self._email_llm or ChatOpenAI(model='gpt-4o', temperature=0.1)
         email_message = [
             SystemMessage(content=EMAILS_SYSTEM_PROMPT),
             HumanMessage(content=state['messages'][-1].content),
         ]
         email_response = email_llm.invoke(email_message)
-        print('Email content:', email_response.content)
+        logger.debug('email_sender: rendered %d chars of HTML', len(email_response.content or ''))
 
         message = Mail(
             from_email=os.environ['FROM_EMAIL'],
@@ -193,11 +212,9 @@ class Agent:
         try:
             sg = SendGridAPIClient(os.environ.get('SENDGRID_API_KEY'))
             response = sg.send(message)
-            print(response.status_code)
-            print(response.body)
-            print(response.headers)
-        except Exception as e:
-            print(str(e))
+            logger.info('email_sender: SendGrid responded status=%s', response.status_code)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('email_sender: SendGrid call failed: %s', scrub(str(e)))
 
     def call_tools_llm(self, state: AgentState):
         dialog = state.get('dialog') or DialogState()
@@ -216,15 +233,19 @@ class Agent:
         tool_calls = state['messages'][-1].tool_calls
         results = []
         for t in tool_calls:
-            print(f'Calling: {t}')
+            # Log only the tool name and scrubbed argument keys — never the
+            # raw values, which may contain passenger emails or passports.
+            scrubbed_args = scrub_mapping(t.get('args') or {})
+            logger.info('invoke_tools: calling %s with %s', t['name'], scrubbed_args)
             if t['name'] not in self._tools:
-                print('\n ....bad tool name....')
-                result = 'bad tool name, retry'
+                logger.warning('invoke_tools: unknown tool %s', t['name'])
+                result = {'status': 'error', 'error_type': 'UnknownTool',
+                          'user_message': 'bad tool name, retry'}
             else:
                 try:
                     result = self._tools[t['name']].invoke(t['args'])
                 except Exception as exc:  # pylint: disable=broad-except
                     result = degrade(exc)
             results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=str(result)))
-        print('Back to the model!')
+        logger.debug('invoke_tools: handled %d tool call(s)', len(tool_calls))
         return {'messages': results}

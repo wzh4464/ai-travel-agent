@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agents.privacy import scrub
+
 
 class TravelAgentError(Exception):
     """Base class for all recoverable errors raised by the agent."""
@@ -72,17 +74,21 @@ def degrade(exc: Exception) -> dict:
     This is the single place where upstream failures get translated into a
     machine-readable shape. The LLM can then decide whether to retry, ask the
     user a clarifying question, or surface the error message verbatim.
+
+    All free-form fields are passed through :func:`agents.privacy.scrub` so
+    PII that leaked into an upstream exception message never reaches the
+    LLM context window or the tool-call log.
     """
     if isinstance(exc, TravelAgentError):
         return {
             'status': 'error',
             'error_type': exc.__class__.__name__,
-            'user_message': exc.user_message,
-            'details': str(exc),
+            'user_message': scrub(exc.user_message),
+            'details': scrub(str(exc)),
         }
     return {
         'status': 'error',
         'error_type': 'UnknownError',
         'user_message': 'An unexpected error occurred while searching flights.',
-        'details': str(exc),
+        'details': scrub(str(exc)),
     }
