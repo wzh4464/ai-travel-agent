@@ -56,6 +56,27 @@ def interpret_fuzzy_date(
     if iso:
         return DateRange(start=iso[0], end=iso[1] if len(iso) > 1 else None)
 
+    # Compact Chinese-style short range: "4.23-5.3", "12/25-1/2", "4.23到5.3"
+    # Year defaults to the current year, rolling forward to next year if
+    # the start date has already passed.
+    compact = re.search(
+        r'(\d{1,2})[./](\d{1,2})\s*[-~到至]\s*(\d{1,2})[./](\d{1,2})',
+        s,
+    )
+    if compact:
+        try:
+            mo1, d1, mo2, d2 = (int(g) for g in compact.groups())
+            year = today.year
+            start = datetime.date(year, mo1, d1)
+            if start < today:
+                start = datetime.date(year + 1, mo1, d1)
+            end = datetime.date(start.year, mo2, d2)
+            if end < start:
+                end = datetime.date(start.year + 1, mo2, d2)
+            return DateRange(start=_fmt(start), end=_fmt(end))
+        except ValueError:
+            pass
+
     if s in ('today', '今天'):
         return DateRange(start=_fmt(today))
     if s in ('tomorrow', '明天'):

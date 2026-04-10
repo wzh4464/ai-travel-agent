@@ -178,7 +178,16 @@ def build_default_aggregator() -> AggregatedFlightSource:
         from agents.data_sources.kiwi_source import KiwiFlightSource  # noqa: WPS433
         return KiwiFlightSource()
 
-    for name, factory in (('serpapi', _serpapi), ('amadeus', _amadeus), ('kiwi', _kiwi)):
+    def _duffel():
+        from agents.data_sources.duffel_source import DuffelFlightSource  # noqa: WPS433
+        return DuffelFlightSource()
+
+    for name, factory in (
+        ('serpapi', _serpapi),
+        ('amadeus', _amadeus),
+        ('kiwi', _kiwi),
+        ('duffel', _duffel),
+    ):
         src = _try_source(factory, name, wanted)
         if src is not None:
             sources.append(src)

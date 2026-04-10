@@ -46,6 +46,11 @@ def kiwi_search_fixture() -> dict:
     return _load_json('kiwi_search.json')
 
 
+@pytest.fixture(scope='session')
+def duffel_offer_request_fixture() -> dict:
+    return _load_json('duffel_offer_request.json')
+
+
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch):
     """Make sure a stray ``SERPAPI_API_KEY`` on the developer's laptop cannot
@@ -59,6 +64,8 @@ def _isolate_env(monkeypatch):
         'TEQUILA_API_KEY',
         'KIWI_API_KEY',
         'KIWI_BASE_URL',
+        'DUFFEL_API_KEY',
+        'DUFFEL_BASE_URL',
         'FLIGHT_SOURCES',
     ):
         monkeypatch.delenv(key, raising=False)

@@ -32,12 +32,29 @@ def _airline_matches(flight: dict, airlines: Iterable[str]) -> bool:
     return False
 
 
+def _touches_banned_transit(flight: dict, banned: set[str]) -> bool:
+    """Return True if ``flight`` routes through any airport in ``banned``.
+
+    Only *intermediate* airports count as transits. The first leg's
+    departure is the user's origin and the last leg's arrival is the
+    chosen destination, neither of which is a transit.
+    """
+    legs = flight.get('legs') or []
+    if len(legs) <= 1:
+        return False  # non-stop flights have no transit
+    for leg in legs[:-1]:
+        if leg.get('arrival_airport') in banned:
+            return True
+    return False
+
+
 def filter_flights(
     flights: list[dict],
     *,
     max_price: Optional[float] = None,
     max_stops: Optional[int] = None,
     airlines: Optional[list[str]] = None,
+    avoid_transit: Optional[set[str]] = None,
 ) -> list[dict]:
     out: list[dict] = []
     for f in flights:
@@ -46,6 +63,8 @@ def filter_flights(
         if max_stops is not None and int(f.get('stops') or 0) > max_stops:
             continue
         if airlines and not _airline_matches(f, airlines):
+            continue
+        if avoid_transit and _touches_banned_transit(f, avoid_transit):
             continue
         out.append(f)
     return out

@@ -66,6 +66,79 @@ class TestExtractIntentChinese:
         assert intent.outbound_date == '2026-06-01'
 
 
+class TestExtractIntentRegionAndTransit:
+    """Tests that demonstrate the open-jaw query path.
+
+    The canonical user phrase for this feature is
+    ``"从香港出发去欧洲 4.23-5.3 要便宜 不要中东中转"`` — everything in
+    that one sentence should land as structured slots.
+    """
+
+    def test_full_hong_kong_europe_sentence(self):
+        intent = extract_intent('从香港出发去欧洲 4.23-5.3 要便宜 不要中东中转')
+        assert intent.origin_code == 'HKG'
+        # No specific destination city (region query)
+        assert intent.destination_code is None
+        assert intent.destination_region == 'europe'
+        assert intent.outbound_date == '2026-04-23'
+        assert intent.return_date == '2026-05-03'
+        assert intent.sort_by == 'price'
+        assert intent.avoid_transit == ['middle_east']
+
+    def test_english_region_phrase(self):
+        intent = extract_intent(
+            'I want to go somewhere in western europe from 2026-04-23 to 2026-05-03'
+        )
+        assert intent.destination_region == 'western_europe'
+
+    def test_region_longer_phrase_wins(self):
+        intent = extract_intent('visiting northern europe next month')
+        assert intent.destination_region == 'northern_europe'
+
+    def test_no_region_when_not_mentioned(self):
+        intent = extract_intent('from Beijing to Tokyo on 2026-05-01')
+        assert intent.destination_region is None
+
+    def test_avoid_transit_raw_iata(self):
+        intent = extract_intent('fly to London but avoid DXB transit please')
+        assert 'DXB' in (intent.avoid_transit or [])
+
+    def test_avoid_transit_strict_variant(self):
+        intent = extract_intent('我不要土耳其中转')
+        assert intent.avoid_transit == ['middle_east_strict']
+
+    def test_origin_only_cjk(self):
+        intent = extract_intent('从香港出发明天')
+        assert intent.origin_code == 'HKG'
+
+    def test_chinese_short_date_range(self):
+        import datetime
+        from agents.intent.fuzzy import interpret_fuzzy_date
+        # Before 4/23 in the current year, we want the current year dates.
+        result = interpret_fuzzy_date('4.23-5.3', today=datetime.date(2026, 4, 1))
+        assert result.start == '2026-04-23'
+        assert result.end == '2026-05-03'
+
+    def test_chinese_short_date_range_rolls_forward(self):
+        import datetime
+        from agents.intent.fuzzy import interpret_fuzzy_date
+        # After 4/23 this year, should roll to next year.
+        result = interpret_fuzzy_date('4.23-5.3', today=datetime.date(2026, 6, 1))
+        assert result.start == '2027-04-23'
+        assert result.end == '2027-05-03'
+
+    def test_chinese_short_date_with_cjk_separator(self):
+        import datetime
+        from agents.intent.fuzzy import interpret_fuzzy_date
+        result = interpret_fuzzy_date('4.23到5.3', today=datetime.date(2026, 4, 1))
+        assert result.start == '2026-04-23'
+        assert result.end == '2026-05-03'
+
+    def test_avoid_transit_empty_list_is_none(self):
+        intent = extract_intent('just a normal search')
+        assert intent.avoid_transit is None
+
+
 class TestDialogState:
     def test_merge_fills_in_missing_slots(self):
         state = DialogState()
