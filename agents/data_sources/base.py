@@ -93,6 +93,14 @@ class BaseFlightSource(abc.ABC):
     def __init__(self, rate_limiter: RateLimiter | None = None):
         self.rate_limiter = rate_limiter or RateLimiter(rate_per_second=2.0, burst=4)
 
+    def is_configured(self) -> bool:
+        """Return True when the adapter has the credentials it needs to run.
+
+        Subclasses override this so the aggregator can skip unconfigured
+        sources silently instead of surfacing auth errors to the user.
+        """
+        return True
+
     @abc.abstractmethod
     def search(
         self,

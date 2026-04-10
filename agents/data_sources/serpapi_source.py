@@ -30,6 +30,9 @@ class SerpAPIFlightSource(BaseFlightSource):
         super().__init__(rate_limiter=rate_limiter or RateLimiter(rate_per_second=1.5, burst=3))
         self._api_key = api_key or os.environ.get('SERPAPI_API_KEY')
 
+    def is_configured(self) -> bool:
+        return bool(self._api_key)
+
     def _raw_search(self, params: dict[str, Any]) -> dict:
         if not self._api_key:
             raise UpstreamAPIError(self.name, detail='SERPAPI_API_KEY is not set')
