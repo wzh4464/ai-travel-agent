@@ -3,6 +3,7 @@
 import datetime
 import logging
 import operator
+import re
 import os
 from typing import Annotated, Any, TypedDict
 
@@ -29,6 +30,32 @@ logger = logging.getLogger(__name__)
 _ = load_dotenv()
 
 CURRENT_YEAR = datetime.datetime.now().year
+
+
+_FLIGHT_INTENT_PATTERN = re.compile(
+    r'(\bflight\w*|\bfly(ing)?\b|\bairline\w*|\bairfare\b|\bairport\b|'
+    r'\bnonstop\b|\bnon-stop\b|\bone[- ]way\b|\bround[- ]?trip\b|'
+    r'\bdeparture\b|\barrival\b|\blayover\b|\blanding\b|\btake[- ]?off\b|'
+    r'机票|航班|航空|飞|班机|往返|单程|起飞|降落|登机|转机)',
+    re.I,
+)
+
+
+def _looks_like_flight_request(text: str, intent) -> bool:
+    """Heuristic gate: only force a flight clarifier when this *seems* like a flight request.
+
+    The deterministic parser fills slots like origin/destination/dates only for
+    flight-shaped phrases. If none of those parsed AND the raw text has no
+    flight keywords, this is most likely a hotel / general / multi-tool request
+    that should pass straight to the LLM.
+    """
+    if any((
+        intent.origin_code, intent.origin_city,
+        intent.destination_code, intent.destination_city, intent.destination_region,
+        intent.outbound_date, intent.return_date,
+    )):
+        return True
+    return bool(_FLIGHT_INTENT_PATTERN.search(text or ''))
 
 
 class AgentState(TypedDict):
@@ -175,7 +202,8 @@ class Agent:
         # Only ask a clarification the first time a slot is missing, so the
         # LLM still has a chance to recover in later turns.
         pending = [m for m in missing if m not in dialog.clarifications_asked]
-        if pending:
+        message_text = last_user.content if last_user is not None else ''
+        if pending and _looks_like_flight_request(message_text, dialog.intent):
             slot = pending[0]
             dialog.clarifications_asked.append(slot)
             updates['messages'] = [AIMessage(content=clarification_question(slot))]

@@ -77,6 +77,11 @@ class SerpAPIFlightSource(BaseFlightSource):
         }
         if return_date:
             params['return_date'] = return_date
+        else:
+            # Google Flights via SerpAPI defaults to round-trip (type=1).
+            # Without this flag a one-way request silently returns no results
+            # because the API expects a return_date.
+            params['type'] = 2
         if max_stops is not None:
             # SerpAPI: 0=any, 1=non-stop, 2=<=1 stop, 3=<=2 stops
             params['stops'] = {0: 1, 1: 2, 2: 3}.get(max_stops, 0)

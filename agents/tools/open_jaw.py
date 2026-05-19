@@ -29,7 +29,7 @@ from typing import Any, List, Optional
 
 from agents._pydantic_compat import BaseModel, Field
 from agents.data_sources import get_default_aggregator
-from agents.errors import MissingParameterError, TravelAgentError, degrade
+from agents.errors import MissingParameterError, NoResultsError, TravelAgentError, UpstreamAPIError, degrade
 from agents.presentation.itinerary import (
     format_open_jaw_combinations,
     rank_open_jaw_combinations,
@@ -128,16 +128,17 @@ def _fan_out(
     adults: int,
     cabin: str,
     max_workers: int = 8,
-) -> dict[tuple[str, str], list[dict]]:
+) -> tuple[dict[tuple[str, str], list[dict]], list[TravelAgentError]]:
     """Run one-way searches for every (origin, destination) pair in parallel.
 
-    Individual pair failures are swallowed and recorded as empty lists —
-    the orchestrator already tolerates partial coverage, and a single
-    flaky city should not invalidate the whole itinerary search.
+    Individual pair failures degrade to empty results so that one flaky leg
+    does not sink the whole search. Errors are returned so callers can detect
+    the all-failed case (and surface it instead of a misleading "no results").
     """
     results: dict[tuple[str, str], list[dict]] = {pair: [] for pair in pairs}
+    errors: list[Exception] = []
     if not pairs:
-        return results
+        return results, errors
 
     with ThreadPoolExecutor(max_workers=min(max_workers, len(pairs))) as pool:
         futures = {
@@ -155,11 +156,15 @@ def _fan_out(
             pair = futures[future]
             try:
                 results[pair] = future.result() or []
+            except NoResultsError:
+                results[pair] = []
             except TravelAgentError as exc:
+                errors.append(exc)
                 logger.info('open_jaw: source failed for %s->%s: %s', *pair, exc.__class__.__name__)
             except Exception as exc:  # pylint: disable=broad-except
+                errors.append(exc)
                 logger.warning('open_jaw: unexpected failure for %s->%s: %s', *pair, exc.__class__.__name__)
-    return results
+    return results, errors
 
 
 # ---------------------------------------------------------------------------
@@ -203,14 +208,19 @@ def open_jaw_search(params: OpenJawInput) -> dict[str, Any]:
     return_pairs = [(dest, params.origin) for dest in destinations]
 
     try:
-        outbound_raw = _fan_out(
+        outbound_raw, outbound_errors = _fan_out(
             source, outbound_pairs, date=params.outbound_date, adults=adults, cabin=cabin,
         )
-        return_raw = _fan_out(
+        return_raw, return_errors = _fan_out(
             source, return_pairs, date=params.return_date, adults=adults, cabin=cabin,
         )
     except Exception as exc:  # pylint: disable=broad-except
         return degrade(exc)
+
+    if (outbound_pairs and not any(outbound_raw.values()) and outbound_errors):
+        return degrade(outbound_errors[0])
+    if (return_pairs and not any(return_raw.values()) and return_errors):
+        return degrade(return_errors[0])
 
     outbound_by_city = {
         dest: outbound_raw.get((params.origin, dest), [])
