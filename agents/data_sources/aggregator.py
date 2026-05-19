@@ -11,6 +11,7 @@ error to the caller.
 
 from __future__ import annotations
 
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable
@@ -18,20 +19,39 @@ from typing import Iterable
 from agents.data_sources.base import BaseFlightSource
 from agents.errors import NoResultsError, TravelAgentError, UpstreamAPIError
 
+logger = logging.getLogger(__name__)
+
 
 def _dedupe(flights: list[dict]) -> list[dict]:
-    """Collapse duplicates across providers, keeping the cheapest entry."""
+    """Collapse duplicates across providers, keeping the cheapest entry.
+
+    The key includes the full leg sequence (airline + flight number + airports
+    + times) so itineraries that share only endpoints (e.g. CDG nonstop vs.
+    CDG via FRA) are not silently merged.
+    """
     by_key: dict[tuple, dict] = {}
     for flight in flights:
         legs = flight.get('legs') or []
         if not legs:
             continue
+        leg_sequence = tuple(
+            (
+                leg.get('airline'),
+                leg.get('flight_number'),
+                leg.get('departure_airport'),
+                leg.get('departure_time'),
+                leg.get('arrival_airport'),
+                leg.get('arrival_time'),
+            )
+            for leg in legs
+        )
         key = (
             legs[0].get('departure_airport'),
             legs[0].get('departure_time'),
             legs[-1].get('arrival_airport'),
             legs[-1].get('arrival_time'),
-            legs[0].get('airline'),
+            len(legs),
+            leg_sequence,
         )
         existing = by_key.get(key)
         if existing is None:
@@ -154,9 +174,14 @@ def _try_source(factory, name: str, wanted: set[str] | None) -> BaseFlightSource
         return None
     try:
         instance = factory()
-    except Exception:  # pylint: disable=broad-except
-        # Missing optional deps (e.g. ``serpapi`` package not installed) must
-        # not break aggregator construction.
+    except (ImportError, ModuleNotFoundError):
+        # Optional dep not installed (e.g. ``serpapi`` package missing).
+        # Aggregator construction must still succeed.
+        return None
+    except Exception as exc:  # pylint: disable=broad-except
+        # A configured-but-broken source should not crash the whole agent,
+        # but it must be diagnosable — log it instead of swallowing.
+        logger.warning('flight source %r failed to initialise: %s', name, exc)
         return None
     return instance
 

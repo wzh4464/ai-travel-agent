@@ -49,6 +49,22 @@ class TestExtractIntentEnglish:
         assert intent.origin_code is None
         assert intent.destination_code is None
 
+    def test_from_to_with_direct_does_not_pollute_city(self):
+        # Regression for the _TERMINATORS list: without "direct" as a
+        # terminator the destination would capture "Tokyo direct".
+        intent = extract_intent('from New York to Tokyo direct on 2026-05-01')
+        assert intent.destination_city == 'Tokyo'
+        assert intent.destination_code in ('HND', 'NRT')
+
+    def test_unicode_city_names_are_captured(self):
+        # Regression for the city-character class: accented Latin names
+        # must not be silently dropped.
+        intent = extract_intent('from São Paulo to München on 2026-05-01')
+        assert intent.origin_city is not None
+        assert 'paulo' in intent.origin_city.lower()
+        assert intent.destination_city is not None
+        assert intent.destination_city.lower().startswith('münch')
+
 
 class TestExtractIntentChinese:
     def test_cjk_from_to(self):

@@ -1,6 +1,7 @@
 # pylint: disable = http-used,print-used,no-self-use
 
 import datetime
+import json
 import logging
 import operator
 import os
@@ -119,8 +120,13 @@ class Agent:
         self._tools = {t.name: t for t in TOOLS}
         if llm is None:
             self._tools_llm = ChatOpenAI(model='gpt-4o').bind_tools(TOOLS)
+        elif hasattr(llm, 'bind_tools'):
+            # Real chat models still need their tools bound, even if they
+            # also expose .invoke (which every LangChain runnable does).
+            self._tools_llm = llm.bind_tools(TOOLS)
         else:
-            self._tools_llm = llm if hasattr(llm, 'invoke') else llm.bind_tools(TOOLS)
+            # Pre-bound runnable / test fake — use as-is.
+            self._tools_llm = llm
         self._email_llm = email_llm
 
         builder = StateGraph(AgentState)
@@ -246,6 +252,12 @@ class Agent:
                     result = self._tools[t['name']].invoke(t['args'])
                 except Exception as exc:  # pylint: disable=broad-except
                     result = degrade(exc)
-            results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=str(result)))
+            # JSON-encode so the LLM can inspect status/error_type/user_message
+            # rather than parsing a flattened Python repr.
+            if isinstance(result, (dict, list)):
+                content = json.dumps(result, default=str, ensure_ascii=False)
+            else:
+                content = str(result)
+            results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=content))
         logger.debug('invoke_tools: handled %d tool call(s)', len(tool_calls))
         return {'messages': results}

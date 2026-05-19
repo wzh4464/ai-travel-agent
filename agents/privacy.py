@@ -84,13 +84,20 @@ def scrub_mapping(mapping: dict[str, Any], *, sensitive_keys: Iterable[str] = ()
             out[key] = scrub(value)
         elif isinstance(value, dict):
             out[key] = scrub_mapping(value, sensitive_keys=sensitive_keys)
-        elif isinstance(value, (list, tuple)):
-            out[key] = type(value)(
+        elif type(value) in (list, tuple):
+            # Only reconstruct plain list/tuple — tuple subclasses (NamedTuple,
+            # typed containers) have custom __init__ signatures that don't
+            # accept a generator argument, and would crash here.
+            scrubbed = [
                 scrub(v) if isinstance(v, str)
                 else scrub_mapping(v, sensitive_keys=sensitive_keys) if isinstance(v, dict)
                 else v
                 for v in value
-            )
+            ]
+            out[key] = scrubbed if isinstance(value, list) else tuple(scrubbed)
+        elif isinstance(value, (list, tuple)):
+            # Tuple subclass / custom Sequence — leave structurally intact.
+            out[key] = value
         else:
             out[key] = value
     return out
