@@ -1,6 +1,7 @@
 # pylint: disable = http-used,print-used,no-self-use
 
 import datetime
+import json
 import operator
 import os
 from typing import Annotated, TypedDict
@@ -225,6 +226,12 @@ class Agent:
                     result = self._tools[t['name']].invoke(t['args'])
                 except Exception as exc:  # pylint: disable=broad-except
                     result = degrade(exc)
-            results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=str(result)))
+            # JSON-encode so the LLM can inspect status/error_type/user_message
+            # rather than parsing a flattened Python repr.
+            if isinstance(result, (dict, list)):
+                content = json.dumps(result, default=str, ensure_ascii=False)
+            else:
+                content = str(result)
+            results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=content))
         print('Back to the model!')
         return {'messages': results}
