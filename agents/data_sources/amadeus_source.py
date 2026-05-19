@@ -88,7 +88,8 @@ class AmadeusFlightSource(BaseFlightSource):
         )
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                payload = json.loads(resp.read())
+                raw = resp.read()
+            payload = json.loads(raw)
         except urllib.error.HTTPError as exc:
             raise UpstreamAPIError(
                 self.name,
@@ -97,6 +98,11 @@ class AmadeusFlightSource(BaseFlightSource):
             ) from exc
         except urllib.error.URLError as exc:
             raise UpstreamAPIError(self.name, detail=f'network error: {exc.reason}') from exc
+        except json.JSONDecodeError as exc:
+            raise UpstreamAPIError(
+                self.name,
+                detail='token endpoint returned non-JSON body',
+            ) from exc
 
         token = payload.get('access_token')
         if not token:
@@ -180,7 +186,8 @@ class AmadeusFlightSource(BaseFlightSource):
         )
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                return json.loads(resp.read())
+                raw = resp.read()
+            return json.loads(raw)
         except urllib.error.HTTPError as exc:
             detail = ''
             try:
@@ -197,3 +204,8 @@ class AmadeusFlightSource(BaseFlightSource):
             raise UpstreamAPIError(self.name, status=exc.code, detail=detail) from exc
         except urllib.error.URLError as exc:
             raise UpstreamAPIError(self.name, detail=f'network error: {exc.reason}') from exc
+        except json.JSONDecodeError as exc:
+            raise UpstreamAPIError(
+                self.name,
+                detail=f'{path} returned non-JSON body',
+            ) from exc
