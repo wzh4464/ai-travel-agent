@@ -155,8 +155,15 @@ def normalize_amadeus(
     """
     carriers = carriers or {}
     itineraries = offer.get('itineraries', []) or []
-    first_itin = itineraries[0] if itineraries else {}
-    segments = first_itin.get('segments', []) or []
+    # Flatten segments across every itinerary so round-trip return legs are
+    # not silently dropped. Track per-itinerary stop counts for the worst-case
+    # ``stops`` figure (matches normalize_duffel's behaviour).
+    segments: list[dict] = []
+    per_itin_stops: list[int] = []
+    for itin in itineraries:
+        itin_segments = itin.get('segments', []) or []
+        segments.extend(itin_segments)
+        per_itin_stops.append(max(0, len(itin_segments) - 1))
 
     # Cabin class lives on travelerPricings[0].fareDetailsBySegment[i].cabin
     fare_details = []
@@ -185,13 +192,15 @@ def normalize_amadeus(
         )
 
     price_block = offer.get('price') or {}
-    total_duration = _parse_iso_duration(first_itin.get('duration', ''))
+    total_duration = sum(
+        _parse_iso_duration((it.get('duration', '') or '')) for it in itineraries
+    )
     return Flight(
         flight_id=str(offer.get('id') or _stable_id(offer)),
         price=float(price_block.get('total', 0) or 0),
         currency=price_block.get('currency', 'USD') or 'USD',
         total_duration_minutes=total_duration,
-        stops=max(0, len(legs) - 1),
+        stops=max(per_itin_stops) if per_itin_stops else 0,
         legs=legs,
         airline_logo='',
         booking_url='',  # Amadeus Self-Service has no direct deep link; use booking API
