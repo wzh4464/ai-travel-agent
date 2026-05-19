@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -57,6 +58,22 @@ def _minutes(value: Any) -> int:
         return 0
 
 
+_PRICE_NUMERIC = re.compile(r'[^0-9.]+')
+
+
+def _coerce_price(raw_price) -> float:
+    """SerpAPI may return prices as ``"$702"`` or ``702`` — accept both."""
+    if raw_price in (None, ''):
+        return 0.0
+    if isinstance(raw_price, (int, float)):
+        return float(raw_price)
+    cleaned = _PRICE_NUMERIC.sub('', str(raw_price))
+    try:
+        return float(cleaned) if cleaned else 0.0
+    except ValueError:
+        return 0.0
+
+
 def normalize_serpapi(raw: dict, provider: str = 'serpapi-google-flights') -> Flight:
     """Convert one SerpAPI google_flights ``best_flights`` item into a Flight."""
     legs_raw = raw.get('flights', []) or []
@@ -78,7 +95,7 @@ def normalize_serpapi(raw: dict, provider: str = 'serpapi-google-flights') -> Fl
     stops = max(0, len(legs) - 1)
     return Flight(
         flight_id=_stable_id(raw),
-        price=float(raw.get('price', 0) or 0),
+        price=_coerce_price(raw.get('price')),
         currency='USD',
         total_duration_minutes=_minutes(raw.get('total_duration', 0)),
         stops=stops,

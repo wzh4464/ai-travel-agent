@@ -19,7 +19,7 @@ class AirportCodeInput(BaseModel):
     city_name: str = Field(description='City name in any common spelling, e.g. "New York", "东京".')
 
 
-@tool
+@tool(args_schema=AirportCodeInput)
 def get_airport_code(city_name: str) -> dict:
     """Resolve a city name to one or more IATA airport codes."""
     codes = lookup(city_name)

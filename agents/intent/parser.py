@@ -45,11 +45,21 @@ class DialogState:
     def merge(self, new: TravelIntent) -> None:
         """Fill in any fields on the tracked intent that the new turn resolved."""
         for key, value in new.as_dict().items():
-            if value in (None, 0, '', 'economy'):
+            # max_stops=0 is a real preference (non-stop). Only treat the
+            # field-appropriate sentinel as "unset".
+            if key == 'max_stops':
+                if value is None:
+                    continue
+            elif key == 'cabin_class':
+                if value in (None, '', 'economy'):
+                    continue
+            elif value in (None, 0, ''):
                 continue
-            # 0 is a valid value for max_stops (non-stop), handle explicitly
             current = getattr(self.intent, key)
-            if current in (None, 0, '', 'economy') or key == 'max_stops':
+            current_unset = current is None or current == '' or (
+                key != 'max_stops' and current == 0
+            ) or (key == 'cabin_class' and current == 'economy')
+            if current_unset:
                 setattr(self.intent, key, value)
 
 
