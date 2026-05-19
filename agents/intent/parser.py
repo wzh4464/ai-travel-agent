@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Optional
 
 from agents.intent.fuzzy import (
@@ -47,10 +47,15 @@ class TravelIntent:
         return asdict(self)
 
 
+# Slots whose dataclass default doubles as the "user didn't say" sentinel.
+# Sourced from TravelIntent so the two definitions can never drift.
+# max_stops is *excluded*: its default is None already, and 0 (non-stop) is a
+# real user preference that must not be treated as "empty".
+_UNSET_BY_DEFAULT = frozenset({'cabin_class', 'adults', 'children'})
 _DEFAULTS = {
-    'cabin_class': 'economy',
-    'adults': 1,
-    'children': 0,
+    f.name: f.default
+    for f in fields(TravelIntent)
+    if f.name in _UNSET_BY_DEFAULT
 }
 
 
@@ -134,22 +139,26 @@ _TERMINATORS = (
     r'on|in|next|this|for|direct|non-?stop|nonstop|cheap|cheapest|'
     r'business|economy|first|premium|with|via|by'
 )
+# City body: Unicode letters (covers accented Latin like São Paulo / München),
+# spaces, hyphens, apostrophes, and digits (for terminal codes like "T3").
+# Excludes the terminator words via the boundary group that follows.
+_CITY_CHARS = r"[^\W_][\w '\-]*?"
 _FROM_TO_EN = re.compile(
-    r'from\s+([A-Za-z ]+?)\s+to\s+([A-Za-z ]+?)'
+    rf'from\s+({_CITY_CHARS})\s+to\s+({_CITY_CHARS})'
     rf'(?:\s+(?:{_TERMINATORS})\b|[,.?!]|$)',
-    re.I,
+    re.I | re.U,
 )
 # Origin-only: "from Beijing next weekend", "leaving from SFO tomorrow".
 _FROM_ONLY_EN = re.compile(
-    r'(?:^|\s)from\s+([A-Za-z ]+?)'
+    rf'(?:^|\s)from\s+({_CITY_CHARS})'
     rf'(?:\s+(?:to|{_TERMINATORS})\b|[,.?!]|$)',
-    re.I,
+    re.I | re.U,
 )
 # Destination-only: "fly to Tokyo", "heading to LHR", "I want to go to Paris".
 _TO_ONLY_EN = re.compile(
-    r'(?:^|\s)(?:fly|go|travel|head(?:ing)?)\s+to\s+([A-Za-z ]+?)'
+    rf'(?:^|\s)(?:fly|go|travel|head(?:ing)?)\s+to\s+({_CITY_CHARS})'
     rf'(?:\s+(?:{_TERMINATORS})\b|[,.?!]|$)',
-    re.I,
+    re.I | re.U,
 )
 _FROM_TO_CN = re.compile(r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:到|飞)\s*([\u4e00-\u9fa5A-Za-z ]+?)(?:\s|，|。|$)')
 # Origin-only CJK: "从香港出发", "从北京动身"

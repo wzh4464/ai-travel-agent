@@ -59,19 +59,43 @@ def _minutes(value: Any) -> int:
         return 0
 
 
-_ISO_DURATION = re.compile(r'^PT(?:(\d+)H)?(?:(\d+)M)?', re.IGNORECASE)
+_PRICE_NUMERIC = re.compile(r'[^0-9.]+')
+
+
+def _coerce_price(raw_price) -> float:
+    """SerpAPI may return prices as ``"$702"`` or ``702`` — accept both."""
+    if raw_price in (None, ''):
+        return 0.0
+    if isinstance(raw_price, (int, float)):
+        return float(raw_price)
+    cleaned = _PRICE_NUMERIC.sub('', str(raw_price))
+    try:
+        return float(cleaned) if cleaned else 0.0
+    except ValueError:
+        return 0.0
+
+
+# Anchored at both ends so we don't silently accept (and mis-parse) values
+# like ``PT1H30M45S`` as 90 minutes. Days are honoured for multi-day
+# itineraries (P1DT2H30M); seconds are tolerated but rounded to minutes.
+_ISO_DURATION = re.compile(
+    r'^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$',
+    re.IGNORECASE,
+)
 
 
 def _parse_iso_duration(value: str) -> int:
-    """Parse an ISO 8601 duration like ``PT10H30M`` into minutes."""
+    """Parse an ISO 8601 duration like ``PT10H30M`` or ``P1DT2H`` into minutes."""
     if not value:
         return 0
     m = _ISO_DURATION.match(value.strip())
     if not m:
         return 0
-    hours = int(m.group(1) or 0)
-    mins = int(m.group(2) or 0)
-    return hours * 60 + mins
+    days = int(m.group(1) or 0)
+    hours = int(m.group(2) or 0)
+    mins = int(m.group(3) or 0)
+    secs = int(m.group(4) or 0)
+    return days * 24 * 60 + hours * 60 + mins + secs // 60
 
 
 def _minutes_between(start: str, end: str) -> int:
@@ -107,7 +131,7 @@ def normalize_serpapi(raw: dict, provider: str = 'serpapi-google-flights') -> Fl
     stops = max(0, len(legs) - 1)
     return Flight(
         flight_id=_stable_id(raw),
-        price=float(raw.get('price', 0) or 0),
+        price=_coerce_price(raw.get('price')),
         currency='USD',
         total_duration_minutes=_minutes(raw.get('total_duration', 0)),
         stops=stops,

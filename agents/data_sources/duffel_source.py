@@ -107,9 +107,15 @@ class DuffelFlightSource(BaseFlightSource):
 
         passengers: list[dict[str, str]] = [{'type': 'adult'} for _ in range(max(1, adults))]
         passengers.extend({'type': 'child'} for _ in range(max(0, children)))
+        # Duffel exposes only adult / child / infant_without_seat. The
+        # NDC convention is to book a seated infant under the child fare
+        # (it gets its own seat that way), and a lap infant as
+        # ``infant_without_seat``. Conflating both into the lap type
+        # under-counts seat capacity and mis-prices the booking.
+        passengers.extend({'type': 'child'} for _ in range(max(0, infants_in_seat or 0)))
         passengers.extend(
             {'type': 'infant_without_seat'}
-            for _ in range(max(0, (infants_in_seat or 0) + (infants_on_lap or 0)))
+            for _ in range(max(0, infants_on_lap or 0))
         )
 
         body = {

@@ -128,7 +128,7 @@ def _fan_out(
     adults: int,
     cabin: str,
     max_workers: int = 8,
-) -> tuple[dict[tuple[str, str], list[dict]], list[TravelAgentError]]:
+) -> tuple[dict[tuple[str, str], list[dict]], list[Exception]]:
     """Run one-way searches for every (origin, destination) pair in parallel.
 
     Individual pair failures degrade to empty results so that one flaky leg

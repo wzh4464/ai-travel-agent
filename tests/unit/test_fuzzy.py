@@ -99,6 +99,11 @@ class TestInterpretPricePreference:
     def test_cjk_under_500(self):
         assert interpret_price_preference('500美元以内') == {'max_price': 500.0}
 
+    def test_dollar_amount_or_less(self):
+        # Regression: the "$N or less" / "$N max" branch must beat the
+        # generic "cheap" keyword fallback.
+        assert interpret_price_preference('$500 or less') == {'max_price': 500.0}
+
     def test_no_signal(self):
         assert interpret_price_preference('random noise') is None
 

@@ -93,3 +93,13 @@ class TestKiwiErrors:
             mock.add('GET', _SEARCH_URL, {'data': []})
             with pytest.raises(NoResultsError):
                 source.search(origin='JFK', destination='LHR', outbound_date='2026-05-01')
+
+    def test_persistent_5xx_raises_upstream_after_retries(self, source, monkeypatch):
+        # Parity with the Amadeus adapter: non-429 HTTP errors must surface
+        # as UpstreamAPIError once with_retries gives up.
+        monkeypatch.setattr('agents.data_sources.base.time.sleep', lambda *_: None)
+        with mock_urlopen() as mock:
+            for _ in range(4):
+                mock.add('GET', _SEARCH_URL, make_http_error(_SEARCH_URL, 500, b'{}'))
+            with pytest.raises(UpstreamAPIError):
+                source.search(origin='JFK', destination='LHR', outbound_date='2026-05-01')
