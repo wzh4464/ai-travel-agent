@@ -1,0 +1,105 @@
+{
+  "data": {
+    "id": "orq_0000AtestRequest",
+    "live_mode": false,
+    "slices": [
+      {"origin": {"iata_code": "HKG"}, "destination": {"iata_code": "CDG"}, "departure_date": "2026-04-23"}
+    ],
+    "passengers": [{"id": "pas_000", "type": "adult"}],
+    "cabin_class": "economy",
+    "offers": [
+      {
+        "id": "off_0000AaaaNonstop",
+        "live_mode": false,
+        "total_amount": "5480.00",
+        "total_currency": "HKD",
+        "base_amount": "4300.00",
+        "base_currency": "HKD",
+        "tax_amount": "1180.00",
+        "tax_currency": "HKD",
+        "owner": {"iata_code": "CX", "name": "Cathay Pacific"},
+        "slices": [
+          {
+            "id": "sli_0000A",
+            "duration": "PT13H0M",
+            "origin": {"iata_code": "HKG", "name": "Hong Kong International Airport"},
+            "destination": {"iata_code": "CDG", "name": "Paris Charles de Gaulle"},
+            "segments": [
+              {
+                "id": "seg_0000A",
+                "origin": {"iata_code": "HKG"},
+                "destination": {"iata_code": "CDG"},
+                "departing_at": "2026-04-23T23:55:00",
+                "arriving_at": "2026-04-24T06:55:00",
+                "duration": "PT13H0M",
+                "marketing_carrier": {"iata_code": "CX", "name": "Cathay Pacific"},
+                "marketing_carrier_flight_number": "261",
+                "operating_carrier": {"iata_code": "CX", "name": "Cathay Pacific"},
+                "operating_carrier_flight_number": "261",
+                "aircraft": {"iata_code": "77W", "name": "Boeing 777-300ER"},
+                "passengers": [
+                  {"passenger_id": "pas_000", "cabin_class": "economy", "cabin_class_marketing_name": "Economy"}
+                ]
+              }
+            ]
+          }
+        ],
+        "payment_requirements": {"requires_instant_payment": false}
+      },
+      {
+        "id": "off_0000AbbbVaDXB",
+        "live_mode": false,
+        "total_amount": "4820.00",
+        "total_currency": "HKD",
+        "base_amount": "3700.00",
+        "base_currency": "HKD",
+        "tax_amount": "1120.00",
+        "tax_currency": "HKD",
+        "owner": {"iata_code": "EK", "name": "Emirates"},
+        "slices": [
+          {
+            "id": "sli_0000B",
+            "duration": "PT17H45M",
+            "origin": {"iata_code": "HKG"},
+            "destination": {"iata_code": "CDG"},
+            "segments": [
+              {
+                "id": "seg_0000B1",
+                "origin": {"iata_code": "HKG"},
+                "destination": {"iata_code": "DXB"},
+                "departing_at": "2026-04-23T03:30:00",
+                "arriving_at": "2026-04-23T07:00:00",
+                "duration": "PT8H30M",
+                "marketing_carrier": {"iata_code": "EK", "name": "Emirates"},
+                "marketing_carrier_flight_number": "385",
+                "operating_carrier": {"iata_code": "EK"},
+                "operating_carrier_flight_number": "385",
+                "aircraft": {"iata_code": "388", "name": "Airbus A380"},
+                "passengers": [
+                  {"passenger_id": "pas_000", "cabin_class": "economy"}
+                ]
+              },
+              {
+                "id": "seg_0000B2",
+                "origin": {"iata_code": "DXB"},
+                "destination": {"iata_code": "CDG"},
+                "departing_at": "2026-04-23T09:30:00",
+                "arriving_at": "2026-04-23T14:15:00",
+                "duration": "PT7H45M",
+                "marketing_carrier": {"iata_code": "EK"},
+                "marketing_carrier_flight_number": "71",
+                "operating_carrier": {"iata_code": "EK"},
+                "operating_carrier_flight_number": "71",
+                "aircraft": {"iata_code": "388"},
+                "passengers": [
+                  {"passenger_id": "pas_000", "cabin_class": "economy"}
+                ]
+              }
+            ]
+          }
+        ],
+        "payment_requirements": {"requires_instant_payment": false}
+      }
+    ]
+  }
+}
