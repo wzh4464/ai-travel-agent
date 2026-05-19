@@ -137,9 +137,15 @@ class AggregatedFlightSource(BaseFlightSource):
         if results:
             return _dedupe(results)
 
-        # Every source failed — surface the most informative error.
-        if errors and all(isinstance(err, NoResultsError) for _, err in errors):
+        # Every source returned nothing.
+        # Case 1: an upstream returned an empty list rather than raising
+        #         NoResultsError — that's still "no flights", not a failure.
+        if not errors:
             raise NoResultsError(origin, destination, outbound_date)
+        # Case 2: every source actually raised NoResultsError.
+        if all(isinstance(err, NoResultsError) for _, err in errors):
+            raise NoResultsError(origin, destination, outbound_date)
+        # Case 3: at least one real upstream failure.
         summary = '; '.join(f'{name}: {err}' for name, err in errors)
         raise UpstreamAPIError(self.name, detail=f'all sources failed ({summary})')
 
@@ -147,7 +153,11 @@ class AggregatedFlightSource(BaseFlightSource):
         for source in self.active_sources():
             try:
                 payload = source.details(flight_id)
-            except TravelAgentError:
+            except TravelAgentError as exc:
+                logger.debug(
+                    'aggregator.details: %s failed for %s: %s',
+                    source.name, flight_id, exc,
+                )
                 continue
             if payload and payload.get('status') != 'unsupported':
                 return payload
