@@ -299,7 +299,10 @@ class Agent:
             if isinstance(scrubbed_result, (dict, list)):
                 content = json.dumps(scrubbed_result, default=str, ensure_ascii=False)
             else:
-                content = str(scrubbed_result)
+                # Scalar tool result (e.g. a plain status string). Run it
+                # through scrub() too — upstream error messages can echo
+                # emails, bearer tokens, or card numbers as bare text.
+                content = scrub(str(scrubbed_result))
             results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=content))
         logger.debug('invoke_tools: handled %d tool call(s)', len(tool_calls))
         return {'messages': results}
