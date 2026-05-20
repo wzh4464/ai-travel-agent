@@ -11,7 +11,7 @@ from typing import Optional
 from langchain.pydantic_v1 import BaseModel, Field
 from langchain_core.tools import tool
 
-from agents.data_sources import get_default_source
+from agents.data_sources import get_default_aggregator
 from agents.errors import MissingParameterError, degrade
 
 
@@ -54,7 +54,7 @@ def flights_finder(params: FlightsInput):
         return degrade(MissingParameterError(missing))
 
     try:
-        source = get_default_source()
+        source = get_default_aggregator()
         return source.search(
             origin=params.departure_airport,
             destination=params.arrival_airport,
