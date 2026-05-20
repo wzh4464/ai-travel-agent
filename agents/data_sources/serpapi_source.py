@@ -41,10 +41,20 @@ class SerpAPIFlightSource(BaseFlightSource):
         try:
             return serpapi.search(params).data
         except Exception as exc:  # serpapi raises bare Exception subclasses
+            # Provider exceptions can echo the request URL (including the
+            # api_key query param) back in ``str(exc)``. Inspect the message
+            # locally to classify rate-limiting, but never propagate the raw
+            # text into the UpstreamAPIError detail — that flows out to the
+            # LLM via ToolMessage and would leak the credential.
             msg = str(exc).lower()
             if '429' in msg or 'rate' in msg:
                 raise RateLimitedError(self.name) from exc
-            raise UpstreamAPIError(self.name, detail=str(exc)) from exc
+            status_code = getattr(exc, 'status_code', None) or getattr(exc, 'code', None)
+            raise UpstreamAPIError(
+                self.name,
+                status=status_code if isinstance(status_code, int) else None,
+                detail='serpapi request failed',
+            ) from exc
 
     @with_retries()
     def search(
@@ -78,9 +88,10 @@ class SerpAPIFlightSource(BaseFlightSource):
         if return_date:
             params['return_date'] = return_date
         else:
-            # Google Flights via SerpAPI defaults to round-trip (type=1).
-            # Without this flag a one-way request silently returns no results
-            # because the API expects a return_date.
+            # Google Flights via SerpAPI defaults to type=1 (round-trip).
+            # Without an explicit type=2 a one-way request (no return_date)
+            # silently returns zero results because the API still expects a
+            # return leg.
             params['type'] = 2
         if max_stops is not None:
             # SerpAPI: 0=any, 1=non-stop, 2=<=1 stop, 3=<=2 stops

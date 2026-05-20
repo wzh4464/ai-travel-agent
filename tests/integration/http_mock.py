@@ -96,7 +96,7 @@ def make_http_error(url: str, code: int, body: bytes = b'', headers: dict | None
 
 
 @contextmanager
-def mock_urlopen(*modules: str) -> Iterator[FlakyURLOpen]:
+def mock_urlopen(*modules: str, allow_unused: bool = False) -> Iterator[FlakyURLOpen]:
     """Patch ``urllib.request.urlopen`` across one or more modules.
 
     Each entry is a fully-qualified module name whose local ``urlopen``
@@ -105,6 +105,13 @@ def mock_urlopen(*modules: str) -> Iterator[FlakyURLOpen]:
     attribute access, so patching the module-level attribute once is
     enough — but when modules do ``from urllib.request import urlopen``
     we need the per-module override.
+
+    By default the context manager asserts every queued response was
+    consumed: a test that primes three responses but only triggers two
+    HTTP calls now fails loudly instead of silently passing. Set
+    ``allow_unused=True`` for the (rare) cases where the queue is
+    deliberately over-provisioned — e.g. error-injection paths that may
+    short-circuit before exhausting the queue.
     """
     mock = FlakyURLOpen()
     targets = ['urllib.request.urlopen']
@@ -127,3 +134,10 @@ def mock_urlopen(*modules: str) -> Iterator[FlakyURLOpen]:
     finally:
         for p in patchers:
             p.stop()
+        if not allow_unused and mock._queue:
+            leftover = [(m, p) for m, p, _ in mock._queue]
+            raise AssertionError(
+                f'mock_urlopen exited with {len(mock._queue)} unused response(s) '
+                f'still queued: {leftover}. Either consume them or pass '
+                f'allow_unused=True if the test is intentionally over-provisioned.'
+            )

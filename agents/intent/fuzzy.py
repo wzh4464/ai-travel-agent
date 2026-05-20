@@ -77,9 +77,10 @@ def interpret_fuzzy_date(
     if iso:
         return DateRange(start=iso[0], end=iso[1] if len(iso) > 1 else None)
 
-    # Compact Chinese-style short range: "4.23-5.3", "12/25-1/2", "4.23到5.3"
-    # Year defaults to the current year, rolling forward to next year if
-    # the start date has already passed.
+    # Compact Chinese-style short range: "4.23-5.3", "12/25-1/2", "4.23到5.3".
+    # Year defaults to the current year, rolling forward to next year if the
+    # start date has already passed. Uses _roll_to_valid_date to skip non-leap
+    # years for Feb 29 inputs.
     compact = re.search(
         r'(\d{1,2})[./](\d{1,2})\s*[-~到至]\s*(\d{1,2})[./](\d{1,2})',
         s,
@@ -112,12 +113,17 @@ def interpret_fuzzy_date(
         except ValueError:
             pass
 
-    if s in ('today', '今天'):
-        return DateRange(start=_fmt(today))
-    if s in ('tomorrow', '明天'):
-        return DateRange(start=_fmt(today + datetime.timedelta(days=1)))
-    if s in ('day after tomorrow', '后天'):
+    # Single-word date phrases — match anywhere in the utterance (not just
+    # when the user typed nothing else) so "fly to Tokyo tomorrow" resolves.
+    # English uses word boundaries; CJK doesn't have word breaks so substring
+    # matching is fine. Longer "day after tomorrow" is checked first so it
+    # wins over the contained "tomorrow".
+    if re.search(r'\bday after tomorrow\b', s) or '后天' in s:
         return DateRange(start=_fmt(today + datetime.timedelta(days=2)))
+    if re.search(r'\btomorrow\b', s) or '明天' in s:
+        return DateRange(start=_fmt(today + datetime.timedelta(days=1)))
+    if re.search(r'\btoday\b', s) or '今天' in s:
+        return DateRange(start=_fmt(today))
 
     if 'next weekend' in s or '下周末' in s or '下个周末' in s:
         days_to_sat = (5 - today.weekday()) % 7 or 7
@@ -168,10 +174,17 @@ def interpret_price_preference(text: str) -> Optional[dict]:
         return None
     s = text.lower()
 
-    # Price-first phrases: "500美元以内", "800元以下", "$500 or less"
-    m = re.search(r'\$?(\d+)\s*(?:美元|元|块|rmb|usd)?\s*(?:以内|以下|左右|or less)', s)
+    # Hard-ceiling phrases: "500美元以内", "800元以下", "$500 or less".
+    # These genuinely mean "at most" and bind to max_price.
+    m = re.search(r'\$?(\d+)\s*(?:美元|元|块|rmb|usd)?\s*(?:以内|以下|or less)', s)
     if m:
         return {'max_price': float(m.group(1))}
+    # Soft / approximate phrases: "500美元左右", "800元左右".
+    # 左右 means "approximately" in Chinese, NOT "at most" — treating it as
+    # a hard ceiling caused us to discard valid offers a few dollars above
+    # the user's budget hint. Map it to a sort hint instead.
+    if re.search(r'\$?\d+\s*(?:美元|元|块|rmb|usd|dollars?)?\s*左右', s):
+        return {'sort_by': 'price'}
     # Keyword-first phrases: "under $500", "below 800", "<= 800"
     m = re.search(r'(?:under|below|<=?)\s*\$?(\d+)', s)
     if m:

@@ -11,6 +11,7 @@ error to the caller.
 
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,12 +23,52 @@ from agents.errors import NoResultsError, TravelAgentError, UpstreamAPIError
 logger = logging.getLogger(__name__)
 
 
+def _canon_code(value) -> str:
+    """Uppercase + strip a flight number or airport code so providers that
+    pad / lowercase / annotate identifiers still collide in dedupe."""
+    return (str(value or '')).strip().upper()
+
+
+def _canon_time(value) -> str:
+    """Truncate ISO-8601 timestamps to whole minutes so providers reporting
+    different second-level precision still collide on the same departure.
+    Times that don't parse as ISO fall back to their original string."""
+    s = str(value or '').strip()
+    if not s:
+        return ''
+    try:
+        # Strip trailing Z, accept missing seconds, normalise to UTC if a
+        # timezone offset is present — we only care about the wall-clock
+        # minute for dedupe.
+        normalised = s.replace('Z', '+00:00')
+        dt = datetime.datetime.fromisoformat(normalised)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+        return dt.replace(second=0, microsecond=0).isoformat(timespec='minutes')
+    except ValueError:
+        return s
+
+
+def _dedupe_price(flight: dict) -> float:
+    """Return a sortable price; missing/zero/garbage become +inf so they
+    can never replace a real priced duplicate."""
+    raw = flight.get('price')
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return float('inf')
+    if value <= 0:
+        return float('inf')
+    return value
+
+
 def _dedupe(flights: list[dict]) -> list[dict]:
     """Collapse duplicates across providers, keeping the cheapest entry.
 
-    The key includes the full leg sequence (airline + flight number + airports
-    + times) so itineraries that share only endpoints (e.g. CDG nonstop vs.
-    CDG via FRA) are not silently merged.
+    The key normalises code casing and timestamp precision so the same
+    leg surfaced by two providers actually collides. Missing / zero prices
+    are treated as +inf so an incomplete provider entry can never replace
+    a real priced duplicate.
     """
     by_key: dict[tuple, dict] = {}
     for flight in flights:
@@ -39,29 +80,34 @@ def _dedupe(flights: list[dict]) -> list[dict]:
         # excluded — flight_number already encodes the carrier code prefix.
         leg_sequence = tuple(
             (
-                leg.get('flight_number'),
-                leg.get('departure_airport'),
-                leg.get('departure_time'),
-                leg.get('arrival_airport'),
-                leg.get('arrival_time'),
+                _canon_code(leg.get('flight_number')),
+                _canon_code(leg.get('departure_airport')),
+                _canon_time(leg.get('departure_time')),
+                _canon_code(leg.get('arrival_airport')),
+                _canon_time(leg.get('arrival_time')),
             )
             for leg in legs
         )
+        # ``currency`` is part of the key so the same physical flight quoted
+        # in two currencies (e.g. SerpAPI/USD and Duffel/HKD for the route
+        # HKG→CDG) is NOT collapsed: the prices are not comparable as raw
+        # numbers, and dropping one would mislead downstream ranking.
         key = (
-            legs[0].get('departure_airport'),
-            legs[0].get('departure_time'),
-            legs[-1].get('arrival_airport'),
-            legs[-1].get('arrival_time'),
+            _canon_code(legs[0].get('departure_airport')),
+            _canon_time(legs[0].get('departure_time')),
+            _canon_code(legs[-1].get('arrival_airport')),
+            _canon_time(legs[-1].get('arrival_time')),
             len(legs),
+            (flight.get('currency') or '').upper(),
             leg_sequence,
         )
         existing = by_key.get(key)
         if existing is None:
             by_key[key] = flight
             continue
-        if float(flight.get('price') or 0) < float(existing.get('price') or 0):
+        if _dedupe_price(flight) < _dedupe_price(existing):
             by_key[key] = flight
-    return sorted(by_key.values(), key=lambda f: float(f.get('price') or 10**9))
+    return sorted(by_key.values(), key=_dedupe_price)
 
 
 class AggregatedFlightSource(BaseFlightSource):

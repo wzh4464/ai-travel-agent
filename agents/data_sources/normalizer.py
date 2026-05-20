@@ -224,10 +224,17 @@ def normalize_kiwi(offer: dict, provider: str = 'kiwi') -> Flight:
     """Convert one Kiwi Tequila ``/v2/search`` item into a canonical Flight."""
     route = offer.get('route', []) or []
     legs: list[FlightLeg] = []
+    # Track the per-direction segment count so ``stops`` matches the
+    # worst-case direction. Kiwi marks outbound segments with return=0 and
+    # the return leg with return=1; falling back to a single bucket when
+    # the field is absent keeps one-way offers consistent.
+    per_direction: dict[int, int] = {}
     for seg in route:
         airline = seg.get('airline', '') or ''
         dep = seg.get('local_departure') or seg.get('utc_departure') or ''
         arr = seg.get('local_arrival') or seg.get('utc_arrival') or ''
+        direction = int(seg.get('return') or 0)
+        per_direction[direction] = per_direction.get(direction, 0) + 1
         legs.append(
             FlightLeg(
                 airline=airline,
@@ -249,12 +256,18 @@ def normalize_kiwi(offer: dict, provider: str = 'kiwi') -> Flight:
     except (TypeError, ValueError):
         total_minutes = 0
 
+    # Per-direction worst-case stop count (matches normalize_amadeus). A
+    # round-trip with two non-stop legs reads as 0 stops, not 1.
+    stops = max(
+        (max(0, count - 1) for count in per_direction.values()),
+        default=max(0, len(legs) - 1),
+    )
     return Flight(
         flight_id=str(offer.get('id') or _stable_id(offer)),
         price=float(offer.get('price', 0) or 0),
         currency='USD',
         total_duration_minutes=total_minutes,
-        stops=max(0, len(legs) - 1),
+        stops=stops,
         legs=legs,
         airline_logo='',
         booking_url=offer.get('deep_link', '') or '',

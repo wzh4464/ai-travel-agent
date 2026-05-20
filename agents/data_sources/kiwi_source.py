@@ -130,7 +130,8 @@ class KiwiFlightSource(BaseFlightSource):
         )
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                return json.loads(resp.read())
+                raw = resp.read()
+            return json.loads(raw)
         except urllib.error.HTTPError as exc:
             detail = ''
             try:
@@ -147,3 +148,8 @@ class KiwiFlightSource(BaseFlightSource):
             raise UpstreamAPIError(self.name, status=exc.code, detail=detail) from exc
         except urllib.error.URLError as exc:
             raise UpstreamAPIError(self.name, detail=f'network error: {exc.reason}') from exc
+        except json.JSONDecodeError as exc:
+            raise UpstreamAPIError(
+                self.name,
+                detail=f'{path} returned non-JSON body',
+            ) from exc

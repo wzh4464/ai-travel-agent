@@ -40,26 +40,76 @@ _FLIGHT_INTENT_PATTERN = re.compile(
     r'机票|航班|航空|飞|班机|往返|单程|起飞|降落|登机|转机)',
     re.I,
 )
+# Non-flight signals that should *override* a routing slot match. A user
+# saying "hotels in Europe next weekend" has destination_region='europe',
+# but the request is plainly not a flight — the LLM router should handle
+# it without us forcing a "Which city will you be flying from?" clarifier.
+_NON_FLIGHT_PATTERN = re.compile(
+    r'(\bhotel\w*|\binn\b|\bmotel|\bhostel|\bresort\w*|\bguest\s*house|'
+    r'\baccommodation|\bcheck[- ]?in|\bcheck[- ]?out|\bnight\b|\bb&b\b|'
+    r'酒店|宾馆|住宿|民宿|青年旅社|床位|入住|退房)',
+    re.I,
+)
 
 
 def _looks_like_flight_request(text: str, intent) -> bool:
     """Heuristic gate: only force a flight clarifier when this *seems* like a flight request.
 
     Treat the request as flight-shaped when the deterministic parser
-    resolved a *routing* slot (origin or destination, by code, city, or
-    region). Date-only matches don't count: "next weekend in Tokyo for
-    a hotel" parses an outbound_date but is plainly not a flight ask.
+    resolved a *routing* slot (origin / destination / region). Date-only
+    matches don't count: "next weekend Tokyo hotel" parses an
+    outbound_date but is plainly not a flight ask.
 
-    Without any routing slot we fall back to scanning the raw text for
-    a flight keyword — that's the path where the LLM/tool router still
-    needs the clarifier nudge.
+    A non-flight keyword (hotel/inn/check-in/酒店/民宿/...) always wins,
+    even over a routing slot — "hotels in Europe" has
+    destination_region='europe' but is unambiguously a hotel question.
+
+    Without any routing slot we fall back to scanning the raw text for a
+    flight keyword.
     """
+    raw = text or ''
+    if _NON_FLIGHT_PATTERN.search(raw):
+        return False
     if any((
         intent.origin_code, intent.origin_city,
         intent.destination_code, intent.destination_city, intent.destination_region,
     )):
         return True
-    return bool(_FLIGHT_INTENT_PATTERN.search(text or ''))
+    return bool(_FLIGHT_INTENT_PATTERN.search(raw))
+
+
+def _strip_raw(obj: Any) -> Any:
+    """Recursively drop ``raw`` keys from dicts inside ``obj``.
+
+    Flight dicts coming out of the normalizers preserve the upstream
+    provider blob under ``raw`` for downstream tools that need to inspect
+    fare-rule fine print or booking deep links. The LLM context, however,
+    should never see those blobs: they routinely carry passenger PII,
+    Authorization-bearing error messages, and other untrusted strings.
+    """
+    if isinstance(obj, dict):
+        return {k: _strip_raw(v) for k, v in obj.items() if k != 'raw'}
+    if isinstance(obj, list):
+        return [_strip_raw(v) for v in obj]
+    return obj
+
+
+def _scrub_tool_result(result: Any) -> Any:
+    """Apply PII scrubbing + ``raw``-stripping to a tool's return value.
+
+    Dict / list payloads are walked with :func:`scrub_mapping` so emails,
+    phone numbers, bearer tokens, and credential-shaped keys are redacted
+    before the value is JSON-encoded into the LLM context. Scalar values
+    pass through to ``scrub(str(...))`` at the call site.
+    """
+    if isinstance(result, dict):
+        return scrub_mapping(_strip_raw(result))
+    if isinstance(result, list):
+        stripped = _strip_raw(result)
+        # Wrap the list so scrub_mapping's recursive helpers can do their
+        # job, then unwrap. Keeps a single recursion entry point.
+        return scrub_mapping({'_': stripped})['_']
+    return result
 
 
 class AgentState(TypedDict):
@@ -292,11 +342,20 @@ class Agent:
                 except Exception as exc:  # pylint: disable=broad-except
                     result = degrade(exc)
             # JSON-encode so the LLM can inspect status/error_type/user_message
-            # rather than parsing a flattened Python repr.
-            if isinstance(result, (dict, list)):
-                content = json.dumps(result, default=str, ensure_ascii=False)
+            # rather than parsing a flattened Python repr. Scrub before
+            # encoding — upstream Flight payloads carry a ``raw`` provider
+            # blob that frequently contains passenger emails, phone numbers,
+            # and Authorization-bearing error messages. Dropping ``raw``
+            # (where present) keeps tool responses lean and eliminates a
+            # class of PII leakage into the LLM context.
+            scrubbed_result = _scrub_tool_result(result)
+            if isinstance(scrubbed_result, (dict, list)):
+                content = json.dumps(scrubbed_result, default=str, ensure_ascii=False)
             else:
-                content = str(result)
+                # Scalar tool result (e.g. a plain status string). Run it
+                # through scrub() too — upstream error messages can echo
+                # emails, bearer tokens, or card numbers as bare text.
+                content = scrub(str(scrubbed_result))
             results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=content))
         logger.debug('invoke_tools: handled %d tool call(s)', len(tool_calls))
         return {'messages': results}

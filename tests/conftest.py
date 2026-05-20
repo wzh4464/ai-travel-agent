@@ -52,10 +52,16 @@ def duffel_offer_request_fixture() -> dict:
 
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch):
-    """Make sure a stray ``SERPAPI_API_KEY`` on the developer's laptop cannot
-    reach a test. Every test starts with a clean slate; individual tests can
-    set the keys they need."""
+    """Wipe every external-service env var so the developer's local shell
+    cannot bleed into the test run.
+
+    Tests that need a specific key set it themselves via ``monkeypatch``,
+    so any leftover from a real ``.env`` file (SerpAPI key, OpenAI token,
+    SendGrid creds, FROM/TO email addresses, etc.) would otherwise change
+    behaviour silently — e.g. cause a stubbed LLM test to hit the real
+    OpenAI endpoint, or a SendGrid send to actually fire."""
     for key in (
+        # Flight-data providers.
         'SERPAPI_API_KEY',
         'AMADEUS_CLIENT_ID',
         'AMADEUS_CLIENT_SECRET',
@@ -66,6 +72,13 @@ def _isolate_env(monkeypatch):
         'DUFFEL_API_KEY',
         'DUFFEL_BASE_URL',
         'FLIGHT_SOURCES',
+        # LLM + email — these reach external services in agent.py and would
+        # turn an offline unit test into a real API call.
+        'OPENAI_API_KEY',
+        'SENDGRID_API_KEY',
+        'FROM_EMAIL',
+        'TO_EMAIL',
+        'EMAIL_SUBJECT',
     ):
         monkeypatch.delenv(key, raising=False)
     # Reset aggregator singleton between tests so env changes take effect.
