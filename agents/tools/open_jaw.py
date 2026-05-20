@@ -29,7 +29,13 @@ from typing import Any, List, Optional
 
 from agents._pydantic_compat import BaseModel, Field
 from agents.data_sources import get_default_aggregator
-from agents.errors import MissingParameterError, NoResultsError, TravelAgentError, UpstreamAPIError, degrade
+from agents.errors import (
+    AmbiguousInputError,
+    MissingParameterError,
+    NoResultsError,
+    TravelAgentError,
+    degrade,
+)
 from agents.presentation.itinerary import (
     format_open_jaw_combinations,
     rank_open_jaw_combinations,
@@ -127,13 +133,19 @@ def _fan_out(
     date: str,
     adults: int,
     cabin: str,
-    max_workers: int = 8,
+    max_workers: int = 4,
 ) -> tuple[dict[tuple[str, str], list[dict]], list[Exception]]:
     """Run one-way searches for every (origin, destination) pair in parallel.
 
     Individual pair failures degrade to empty results so that one flaky leg
     does not sink the whole search. Errors are returned so callers can detect
     the all-failed case (and surface it instead of a misleading "no results").
+
+    ``max_workers`` is intentionally modest: ``source.search()`` is typically
+    the aggregator, which spawns its own ThreadPoolExecutor across providers.
+    Total concurrency is therefore ``pairs`` × ``providers``, so keeping the
+    outer pool tight (≤4) avoids the multiplicative thread blow-up flagged
+    in reviews.
     """
     results: dict[tuple[str, str], list[dict]] = {pair: [] for pair in pairs}
     errors: list[Exception] = []
@@ -188,9 +200,13 @@ def open_jaw_search(params: OpenJawInput) -> dict[str, Any]:
 
     destinations = _resolve_destinations(params.destination_region)
     if not destinations:
+        # The parameter is *present* but unrecognised, so use Ambiguous
+        # rather than Missing — callers can distinguish "user forgot to
+        # say where" from "the region name didn't map to any cities".
         return degrade(
-            MissingParameterError(
-                [f"destination_region '{params.destination_region}' could not be expanded"]
+            AmbiguousInputError(
+                'destination_region',
+                options=[f"unrecognised value: {params.destination_region!r}"],
             )
         )
 

@@ -12,12 +12,7 @@ from agents.intent.fuzzy import (
     interpret_stops_preference,
 )
 from agents.intent.iata import lookup as lookup_airport_code
-from agents.regions import (
-    REGION_CJK_ALIASES,
-    REGIONS,
-    TRANSIT_CJK_ALIASES,
-    TRANSIT_BLACKLISTS,
-)
+from agents.regions import REGION_CJK_ALIASES, TRANSIT_BLACKLISTS
 
 
 @dataclass
@@ -224,9 +219,10 @@ def _extract_region(text: str) -> Optional[str]:
     """Return a canonical region key if one is mentioned, else None."""
     if not text:
         return None
-    for phrase, canonical in REGION_CJK_ALIASES.items():
+    # Match the longest CJK alias first so "全欧洲" beats "欧洲".
+    for phrase in sorted(REGION_CJK_ALIASES, key=len, reverse=True):
         if phrase in text:
-            return canonical
+            return REGION_CJK_ALIASES[phrase]
     lowered = text.lower()
     # Prefer the longest phrase so "western europe" beats "europe".
     for phrase in sorted(_REGION_EN_KEYWORDS, key=len, reverse=True):

@@ -9,16 +9,13 @@ from agents.presentation.itinerary import (
     format_open_jaw_combinations,
     rank_open_jaw_combinations,
 )
-from agents.presentation.sorting import (
-    _touches_banned_transit,
-    filter_flights,
-    sort_flights,
-)
+from agents.presentation.sorting import filter_flights, sort_flights
 
+# ``_touches_banned_transit`` lives in :mod:`agents.presentation.sorting`
+# and is a private helper. Internal callers import it directly from there.
 __all__ = [
     'filter_flights',
     'sort_flights',
-    '_touches_banned_transit',
     'format_card',
     'format_comparison_table',
     'format_flight_list',
