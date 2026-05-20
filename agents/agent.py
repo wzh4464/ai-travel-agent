@@ -45,15 +45,18 @@ _FLIGHT_INTENT_PATTERN = re.compile(
 def _looks_like_flight_request(text: str, intent) -> bool:
     """Heuristic gate: only force a flight clarifier when this *seems* like a flight request.
 
-    The deterministic parser fills slots like origin/destination/dates only for
-    flight-shaped phrases. If none of those parsed AND the raw text has no
-    flight keywords, this is most likely a hotel / general / multi-tool request
-    that should pass straight to the LLM.
+    Treat the request as flight-shaped when the deterministic parser
+    resolved a *routing* slot (origin or destination, by code, city, or
+    region). Date-only matches don't count: "next weekend in Tokyo for
+    a hotel" parses an outbound_date but is plainly not a flight ask.
+
+    Without any routing slot we fall back to scanning the raw text for
+    a flight keyword — that's the path where the LLM/tool router still
+    needs the clarifier nudge.
     """
     if any((
         intent.origin_code, intent.origin_city,
         intent.destination_code, intent.destination_city, intent.destination_region,
-        intent.outbound_date, intent.return_date,
     )):
         return True
     return bool(_FLIGHT_INTENT_PATTERN.search(text or ''))
