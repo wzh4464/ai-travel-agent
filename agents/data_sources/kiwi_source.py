@@ -82,7 +82,10 @@ class KiwiFlightSource(BaseFlightSource):
         max_stops: int | None = None,
     ) -> list[dict]:
         if not self.is_configured():
-            raise UpstreamAPIError(self.name, detail='TEQUILA_API_KEY not set')
+            raise UpstreamAPIError(
+                self.name,
+                detail='Kiwi API key not set (TEQUILA_API_KEY or KIWI_API_KEY)',
+            )
         self.rate_limiter.acquire()
 
         params: dict[str, Any] = {

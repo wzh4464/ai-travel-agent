@@ -197,7 +197,14 @@ def _try_source(factory, name: str, wanted: set[str] | None) -> BaseFlightSource
 
 
 def build_default_aggregator() -> AggregatedFlightSource:
-    """Assemble an aggregator from every source whose credentials are present."""
+    """Assemble an aggregator from every source whose optional dependency loads.
+
+    Sources are *constructed* eagerly (the SDK / optional dep has to import)
+    but the credential check is deferred to ``is_configured()``, which the
+    aggregator consults via ``active_sources()`` on every call. That keeps
+    runtime configuration (env vars rotated mid-process, late ``.env``
+    loading) actually live.
+    """
     wanted = _env_source_filter()
     sources: list[BaseFlightSource] = []
 
