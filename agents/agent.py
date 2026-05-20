@@ -5,6 +5,7 @@ import json
 import logging
 import operator
 import os
+import re
 from typing import Annotated, Any, TypedDict
 
 from dotenv import load_dotenv
@@ -32,6 +33,58 @@ _ = load_dotenv()
 CURRENT_YEAR = datetime.datetime.now().year
 
 
+_FLIGHT_INTENT_PATTERN = re.compile(
+    r'(\bflight\w*|\bfly(ing)?\b|\bairline\w*|\bairfare\b|\bairport\b|'
+    r'\bnonstop\b|\bnon-stop\b|\bone[- ]way\b|\bround[- ]?trip\b|'
+    r'\bdeparture\b|\barrival\b|\blayover\b|\blanding\b|\btake[- ]?off\b|'
+    r'机票|航班|航空|飞|班机|往返|单程|起飞|降落|登机|转机)',
+    re.I,
+)
+# Non-flight signals that should *override* a routing slot match. A user
+# saying "hotels in Europe next weekend" has destination_region='europe',
+# but the request is plainly not a flight — the LLM router should handle
+# it without us forcing a "Which city will you be flying from?" clarifier.
+_NON_FLIGHT_PATTERN = re.compile(
+    r'(\bhotel\w*|\binn\b|\bmotel|\bhostel|\bresort\w*|\bguest\s*house|'
+    r'\baccommodation|\blodging\b|\bairbnb\b|\bstay\b|\broom\b|\bsuite\b|'
+    r'\bcheck[- ]?in|\bcheck[- ]?out|\bb&b\b|'
+    r'酒店|宾馆|旅馆|客栈|住宿|民宿|青年旅社|床位|入住|退房|房间)',
+    re.I,
+)
+
+
+def _looks_like_flight_request(text: str, intent) -> bool:
+    """Heuristic gate: only force a flight clarifier when this *seems* like a flight request.
+
+    Resolution order:
+
+    1. An explicit flight keyword (``flight``/``fly``/``机票``/...) always
+       wins. ``"flight to Tokyo with hotel"`` is a flight question even
+       though "hotel" also appears.
+    2. Otherwise, a non-flight keyword (``hotel``/``lodging``/``酒店``/...)
+       suppresses the gate. ``"hotels in Europe next weekend"`` parses a
+       ``destination_region`` but is unambiguously a hotel ask.
+    3. Otherwise, a routing slot (origin / destination / region) means the
+       parser is confident enough to treat this as flight-shaped — the
+       open-jaw "去欧洲" path lives here.
+    4. Otherwise, fall back to the flight-keyword scan one more time
+       (already returned False in step 1 if no match — kept here for
+       readability so the four branches read top-to-bottom).
+    """
+    raw = text or ''
+    has_flight_kw = bool(_FLIGHT_INTENT_PATTERN.search(raw))
+    if has_flight_kw:
+        return True
+    if _NON_FLIGHT_PATTERN.search(raw):
+        return False
+    if any((
+        intent.origin_code, intent.origin_city,
+        intent.destination_code, intent.destination_city, intent.destination_region,
+    )):
+        return True
+    return False
+
+
 def _strip_raw(obj: Any) -> Any:
     """Recursively drop ``raw`` keys from dicts inside ``obj``.
 
@@ -54,8 +107,7 @@ def _scrub_tool_result(result: Any) -> Any:
     Dict / list payloads are walked with :func:`scrub_mapping` so emails,
     phone numbers, bearer tokens, and credential-shaped keys are redacted
     before the value is JSON-encoded into the LLM context. Scalar values
-    pass through unchanged (they're coerced via ``str()`` at the call
-    site).
+    pass through to ``scrub(str(...))`` at the call site.
     """
     if isinstance(result, dict):
         return scrub_mapping(_strip_raw(result))
@@ -76,8 +128,15 @@ TOOLS_SYSTEM_PROMPT = f"""You are a smart travel agency with a layered flight-se
 
 Tool usage guidance:
   * Always resolve city names with `get_airport_code` before calling `flights_finder`.
-  * Call `flights_finder` with structured, canonical parameters. The result is
-    already a list of normalised Flight dicts with a `flight_id` for each item.
+  * Call `flights_finder` with structured, canonical parameters when the user
+    has a specific origin and destination city pair. The result is a list of
+    normalised Flight dicts with a `flight_id` for each item.
+  * Call `open_jaw_search` instead of `flights_finder` when the user gives a
+    flexible/region-level destination such as "somewhere in Europe", "欧洲",
+    "northern europe", or when they say entry and exit cities don't have to
+    match ("进出不同城市都可以", "open-jaw", "any European city"). Pass
+    `avoid_transit=["middle_east"]` when the user says things like "不要中东中转"
+    or "no Dubai/Doha connection".
   * To sort, filter, or compare existing results, call `compare_prices`—do not
     re-query `flights_finder` for trivial re-ranking.
   * For baggage / layover / booking URLs on a specific option, call
@@ -210,7 +269,8 @@ class Agent:
         # Only ask a clarification the first time a slot is missing, so the
         # LLM still has a chance to recover in later turns.
         pending = [m for m in missing if m not in dialog.clarifications_asked]
-        if pending:
+        message_text = last_user.content if last_user is not None else ''
+        if pending and _looks_like_flight_request(message_text, dialog.intent):
             slot = pending[0]
             dialog.clarifications_asked.append(slot)
             updates['messages'] = [AIMessage(content=clarification_question(slot))]

@@ -18,6 +18,7 @@ from agents.data_sources.normalizer import (
     Flight,
     FlightLeg,
     normalize_amadeus,
+    normalize_duffel,
     normalize_kiwi,
     normalize_serpapi,
 )
@@ -31,12 +32,14 @@ __all__ = [
     'normalize_serpapi',
     'normalize_amadeus',
     'normalize_kiwi',
+    'normalize_duffel',
     'AggregatedFlightSource',
     'build_default_aggregator',
     'get_default_aggregator',
     'SerpAPIFlightSource',
     'AmadeusFlightSource',
     'KiwiFlightSource',
+    'DuffelFlightSource',
     'get_default_source',
 ]
 
@@ -58,4 +61,7 @@ def __getattr__(name):  # PEP 562 lazy imports
     if name == 'KiwiFlightSource':
         from agents.data_sources.kiwi_source import KiwiFlightSource  # noqa: WPS433
         return KiwiFlightSource
+    if name == 'DuffelFlightSource':
+        from agents.data_sources.duffel_source import DuffelFlightSource  # noqa: WPS433
+        return DuffelFlightSource
     raise AttributeError(name)

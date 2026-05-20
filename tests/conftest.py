@@ -45,6 +45,11 @@ def kiwi_search_fixture() -> dict:
     return _load_json('kiwi_search.json')
 
 
+@pytest.fixture(scope='session')
+def duffel_offer_request_fixture() -> dict:
+    return _load_json('duffel_offer_request.json')
+
+
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch):
     """Wipe every external-service env var so the developer's local shell
@@ -64,6 +69,8 @@ def _isolate_env(monkeypatch):
         'TEQUILA_API_KEY',
         'KIWI_API_KEY',
         'KIWI_BASE_URL',
+        'DUFFEL_API_KEY',
+        'DUFFEL_BASE_URL',
         'FLIGHT_SOURCES',
         # LLM + email — these reach external services in agent.py and would
         # turn an offline unit test into a real API call.
