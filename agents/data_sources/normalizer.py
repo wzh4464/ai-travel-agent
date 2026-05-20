@@ -77,7 +77,8 @@ def _coerce_price(raw_price) -> float:
 
 # Anchored at both ends so we don't silently accept (and mis-parse) values
 # like ``PT1H30M45S`` as 90 minutes. Days are honoured for multi-day
-# itineraries (P1DT2H30M); seconds are tolerated but rounded to minutes.
+# itineraries (P1DT2H30M); seconds are truncated to whole minutes (45s
+# becomes 0 minutes — close enough for itinerary durations).
 _ISO_DURATION = re.compile(
     r'^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$',
     re.IGNORECASE,
@@ -99,15 +100,20 @@ def _parse_iso_duration(value: str) -> int:
 
 
 def _minutes_between(start: str, end: str) -> int:
-    """Best-effort minute diff between two ISO timestamps."""
+    """Best-effort minute diff between two ISO timestamps.
+
+    Falls back to 0 if either side is missing, unparseable, or if one side
+    is timezone-aware while the other is naive (which would otherwise raise
+    TypeError on subtraction).
+    """
     if not start or not end:
         return 0
     try:
         a = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
         b = datetime.datetime.fromisoformat(end.replace('Z', '+00:00'))
-    except ValueError:
+        return max(0, int((b - a).total_seconds() // 60))
+    except (ValueError, TypeError):
         return 0
-    return max(0, int((b - a).total_seconds() // 60))
 
 
 def normalize_serpapi(raw: dict, provider: str = 'serpapi-google-flights') -> Flight:
@@ -159,8 +165,10 @@ def normalize_amadeus(
     carriers = carriers or {}
     itineraries = offer.get('itineraries', []) or []
     # Flatten segments across every itinerary so round-trip return legs are
-    # not silently dropped. Track per-itinerary stop counts for the worst-case
-    # ``stops`` figure (matches normalize_duffel's behaviour).
+    # not silently dropped. ``stops`` reports the worst-case per-itinerary
+    # count: a one-stop outbound paired with a non-stop return reads as
+    # "1 stop" so the user is not misled into thinking the whole booking
+    # is non-stop.
     segments: list[dict] = []
     per_itin_stops: list[int] = []
     for itin in itineraries:
