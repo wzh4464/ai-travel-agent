@@ -2,9 +2,10 @@
 
 import datetime
 import json
+import logging
 import operator
 import os
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
@@ -21,11 +22,49 @@ from agents.intent import (
     extract_intent,
     missing_slots,
 )
+from agents.privacy import scrub, scrub_mapping
 from agents.tools import ALL_TOOLS
+
+logger = logging.getLogger(__name__)
 
 _ = load_dotenv()
 
 CURRENT_YEAR = datetime.datetime.now().year
+
+
+def _strip_raw(obj: Any) -> Any:
+    """Recursively drop ``raw`` keys from dicts inside ``obj``.
+
+    Flight dicts coming out of the normalizers preserve the upstream
+    provider blob under ``raw`` for downstream tools that need to inspect
+    fare-rule fine print or booking deep links. The LLM context, however,
+    should never see those blobs: they routinely carry passenger PII,
+    Authorization-bearing error messages, and other untrusted strings.
+    """
+    if isinstance(obj, dict):
+        return {k: _strip_raw(v) for k, v in obj.items() if k != 'raw'}
+    if isinstance(obj, list):
+        return [_strip_raw(v) for v in obj]
+    return obj
+
+
+def _scrub_tool_result(result: Any) -> Any:
+    """Apply PII scrubbing + ``raw``-stripping to a tool's return value.
+
+    Dict / list payloads are walked with :func:`scrub_mapping` so emails,
+    phone numbers, bearer tokens, and credential-shaped keys are redacted
+    before the value is JSON-encoded into the LLM context. Scalar values
+    pass through unchanged (they're coerced via ``str()`` at the call
+    site).
+    """
+    if isinstance(result, dict):
+        return scrub_mapping(_strip_raw(result))
+    if isinstance(result, list):
+        stripped = _strip_raw(result)
+        # Wrap the list so scrub_mapping's recursive helpers can do their
+        # job, then unwrap. Keeps a single recursion entry point.
+        return scrub_mapping({'_': stripped})['_']
+    return result
 
 
 class AgentState(TypedDict):
@@ -101,9 +140,29 @@ Expected Output:
 
 class Agent:
 
-    def __init__(self):
+    def __init__(self, llm: Any = None, email_llm: Any = None):
+        """Construct the agent graph.
+
+        Parameters
+        ----------
+        llm:
+            Optional chat model (already bound to ``TOOLS`` or not). When
+            ``None`` a default ``ChatOpenAI('gpt-4o')`` is created. Tests
+            inject a deterministic fake here to avoid real LLM calls.
+        email_llm:
+            Optional chat model used by the email-sender node.
+        """
         self._tools = {t.name: t for t in TOOLS}
-        self._tools_llm = ChatOpenAI(model='gpt-4o').bind_tools(TOOLS)
+        if llm is None:
+            self._tools_llm = ChatOpenAI(model='gpt-4o').bind_tools(TOOLS)
+        elif hasattr(llm, 'bind_tools'):
+            # Real chat models still need their tools bound, even if they
+            # also expose .invoke (which every LangChain runnable does).
+            self._tools_llm = llm.bind_tools(TOOLS)
+        else:
+            # Pre-bound runnable / test fake — use as-is.
+            self._tools_llm = llm
+        self._email_llm = email_llm
 
         builder = StateGraph(AgentState)
         builder.add_node('parse_intent', self.parse_intent)
@@ -127,7 +186,8 @@ class Agent:
         memory = MemorySaver()
         self.graph = builder.compile(checkpointer=memory, interrupt_before=['email_sender'])
 
-        print(self.graph.get_graph().draw_mermaid())
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug('graph mermaid:\n%s', self.graph.get_graph().draw_mermaid())
 
     # ------------------------------------------------------------------
     # graph nodes
@@ -176,14 +236,14 @@ class Agent:
         return 'more_tools'
 
     def email_sender(self, state: AgentState):
-        print('Sending email')
-        email_llm = ChatOpenAI(model='gpt-4o', temperature=0.1)
+        logger.info('email_sender: preparing HTML email')
+        email_llm = self._email_llm or ChatOpenAI(model='gpt-4o', temperature=0.1)
         email_message = [
             SystemMessage(content=EMAILS_SYSTEM_PROMPT),
             HumanMessage(content=state['messages'][-1].content),
         ]
         email_response = email_llm.invoke(email_message)
-        print('Email content:', email_response.content)
+        logger.debug('email_sender: rendered %d chars of HTML', len(email_response.content or ''))
 
         message = Mail(
             from_email=os.environ['FROM_EMAIL'],
@@ -194,11 +254,9 @@ class Agent:
         try:
             sg = SendGridAPIClient(os.environ.get('SENDGRID_API_KEY'))
             response = sg.send(message)
-            print(response.status_code)
-            print(response.body)
-            print(response.headers)
-        except Exception as e:
-            print(str(e))
+            logger.info('email_sender: SendGrid responded status=%s', response.status_code)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error('email_sender: SendGrid call failed: %s', scrub(str(e)))
 
     def call_tools_llm(self, state: AgentState):
         dialog = state.get('dialog') or DialogState()
@@ -217,21 +275,34 @@ class Agent:
         tool_calls = state['messages'][-1].tool_calls
         results = []
         for t in tool_calls:
-            print(f'Calling: {t}')
+            # Log only the tool name and scrubbed argument keys — never the
+            # raw values, which may contain passenger emails or passports.
+            scrubbed_args = scrub_mapping(t.get('args') or {})
+            logger.info('invoke_tools: calling %s with %s', t['name'], scrubbed_args)
             if t['name'] not in self._tools:
-                print('\n ....bad tool name....')
-                result = 'bad tool name, retry'
+                logger.warning('invoke_tools: unknown tool %s', t['name'])
+                result = {'status': 'error', 'error_type': 'UnknownTool',
+                          'user_message': 'bad tool name, retry'}
             else:
                 try:
                     result = self._tools[t['name']].invoke(t['args'])
                 except Exception as exc:  # pylint: disable=broad-except
                     result = degrade(exc)
             # JSON-encode so the LLM can inspect status/error_type/user_message
-            # rather than parsing a flattened Python repr.
-            if isinstance(result, (dict, list)):
-                content = json.dumps(result, default=str, ensure_ascii=False)
+            # rather than parsing a flattened Python repr. Scrub before
+            # encoding — upstream Flight payloads carry a ``raw`` provider
+            # blob that frequently contains passenger emails, phone numbers,
+            # and Authorization-bearing error messages. Dropping ``raw``
+            # (where present) keeps tool responses lean and eliminates a
+            # class of PII leakage into the LLM context.
+            scrubbed_result = _scrub_tool_result(result)
+            if isinstance(scrubbed_result, (dict, list)):
+                content = json.dumps(scrubbed_result, default=str, ensure_ascii=False)
             else:
-                content = str(result)
+                # Scalar tool result (e.g. a plain status string). Run it
+                # through scrub() too — upstream error messages can echo
+                # emails, bearer tokens, or card numbers as bare text.
+                content = scrub(str(scrubbed_result))
             results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=content))
-        print('Back to the model!')
+        logger.debug('invoke_tools: handled %d tool call(s)', len(tool_calls))
         return {'messages': results}

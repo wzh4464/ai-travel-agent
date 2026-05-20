@@ -1,0 +1,62 @@
+{
+  "best_flights": [
+    {
+      "flights": [
+        {
+          "departure_airport": {"name": "John F. Kennedy International Airport", "id": "JFK", "time": "2026-05-01 08:00"},
+          "arrival_airport": {"name": "Heathrow", "id": "LHR", "time": "2026-05-01 19:30"},
+          "duration": 690,
+          "airplane": "Boeing 777",
+          "airline": "American Airlines",
+          "airline_logo": "https://www.gstatic.com/flights/airline_logos/70px/AA.png",
+          "travel_class": "Economy",
+          "flight_number": "AA 100",
+          "extensions": ["Average legroom (31 in)", "Wi-Fi for a fee", "In-seat power & USB outlets"]
+        }
+      ],
+      "layovers": [],
+      "total_duration": 690,
+      "carbon_emissions": {"this_flight": 450000, "typical_for_this_route": 460000, "difference_percent": -2},
+      "price": 520,
+      "type": "Round trip",
+      "airline_logo": "https://www.gstatic.com/flights/airline_logos/70px/AA.png",
+      "booking_token": "JFK-LHR-20260501-AA100"
+    },
+    {
+      "flights": [
+        {
+          "departure_airport": {"name": "John F. Kennedy International Airport", "id": "JFK", "time": "2026-05-01 10:00"},
+          "arrival_airport": {"name": "Charles de Gaulle", "id": "CDG", "time": "2026-05-01 22:30"},
+          "duration": 450,
+          "airplane": "Boeing 787",
+          "airline": "Delta",
+          "airline_logo": "https://www.gstatic.com/flights/airline_logos/70px/DL.png",
+          "travel_class": "Economy",
+          "flight_number": "DL 401",
+          "extensions": ["Average legroom (31 in)"]
+        },
+        {
+          "departure_airport": {"name": "Charles de Gaulle", "id": "CDG", "time": "2026-05-02 07:00"},
+          "arrival_airport": {"name": "Heathrow", "id": "LHR", "time": "2026-05-02 08:15"},
+          "duration": 75,
+          "airplane": "Airbus A320",
+          "airline": "Air France",
+          "airline_logo": "https://www.gstatic.com/flights/airline_logos/70px/AF.png",
+          "travel_class": "Economy",
+          "flight_number": "AF 1280",
+          "extensions": []
+        }
+      ],
+      "layovers": [
+        {"duration": 510, "name": "Paris Charles de Gaulle", "id": "CDG", "overnight": true}
+      ],
+      "total_duration": 1035,
+      "carbon_emissions": {"this_flight": 420000},
+      "price": 410,
+      "type": "Round trip",
+      "airline_logo": "https://www.gstatic.com/flights/airline_logos/70px/DL.png",
+      "booking_token": "JFK-CDG-LHR-20260501"
+    }
+  ],
+  "other_flights": []
+}

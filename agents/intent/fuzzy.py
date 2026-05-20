@@ -117,12 +117,24 @@ def interpret_price_preference(text: str) -> Optional[dict]:
         return None
     s = text.lower()
 
-    # explicit number: "under $500", "500 美元以内", "<= 800"
-    m = re.search(r'(?:under|below|<=?|以内|以下)\s*\$?(\d+)', s)
+    # Hard-ceiling phrases: "500美元以内", "800元以下", "$500 or less".
+    # These genuinely mean "at most" and bind to max_price.
+    m = re.search(r'\$?(\d+)\s*(?:美元|元|块|rmb|usd)?\s*(?:以内|以下|or less)', s)
     if m:
         return {'max_price': float(m.group(1))}
-    m = re.search(r'\$(\d+)\s*(?:or less|左右|以内|以下)?', s)
-    if m and ('under' in s or 'cheap' in s or 'less' in s or '以内' in s or '以下' in s):
+    # Soft / approximate phrases: "500美元左右", "800元左右".
+    # 左右 means "approximately" in Chinese, NOT "at most" — treating it as
+    # a hard ceiling caused us to discard valid offers a few dollars above
+    # the user's budget hint. Map it to a sort hint instead.
+    if re.search(r'\$?\d+\s*(?:美元|元|块|rmb|usd|dollars?)?\s*左右', s):
+        return {'sort_by': 'price'}
+    # Keyword-first phrases: "under $500", "below 800", "<= 800"
+    m = re.search(r'(?:under|below|<=?)\s*\$?(\d+)', s)
+    if m:
+        return {'max_price': float(m.group(1))}
+    # "$500 ... cheap" — dollar amount with a cheap/less hint nearby
+    m = re.search(r'\$(\d+)', s)
+    if m and ('cheap' in s or 'less' in s):
         return {'max_price': float(m.group(1))}
 
     if any(k in s for k in ('cheap', 'cheapest', 'low cost', 'budget', '便宜', '最便宜', '经济')):

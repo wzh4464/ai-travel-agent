@@ -6,7 +6,7 @@ intent parser and the LLM-facing tool share a single source of truth.
 
 from __future__ import annotations
 
-from langchain.pydantic_v1 import BaseModel, Field
+from agents._pydantic_compat import BaseModel, Field
 from langchain_core.tools import tool
 
 from agents.intent.iata import CITY_TO_IATA, lookup

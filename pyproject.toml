@@ -17,6 +17,17 @@ sendgrid = "^6.11.0"
 streamlit = "^1.38.0"
 serpapi = "^0.1.5"
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+filterwarnings = [
+    "ignore::DeprecationWarning:pydantic.*",
+    "ignore::DeprecationWarning:langchain.*",
+]
+
 
 [build-system]
 requires = ["poetry-core"]

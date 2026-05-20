@@ -1,0 +1,11 @@
+{
+  "type": "amadeusOAuth2Token",
+  "username": "test@example.test",
+  "application_name": "ai-travel-agent-test",
+  "client_id": "test-client",
+  "token_type": "Bearer",
+  "access_token": "FAKE-AMADEUS-TOKEN-abcdef123456",
+  "expires_in": 1799,
+  "state": "approved",
+  "scope": ""
+}

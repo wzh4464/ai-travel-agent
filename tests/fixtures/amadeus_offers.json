@@ -1,0 +1,118 @@
+{
+  "meta": {"count": 2},
+  "data": [
+    {
+      "type": "flight-offer",
+      "id": "1",
+      "source": "GDS",
+      "instantTicketingRequired": false,
+      "nonHomogeneous": false,
+      "oneWay": false,
+      "lastTicketingDate": "2026-04-20",
+      "numberOfBookableSeats": 4,
+      "itineraries": [
+        {
+          "duration": "PT11H30M",
+          "segments": [
+            {
+              "departure": {"iataCode": "JFK", "terminal": "8", "at": "2026-05-01T08:00:00"},
+              "arrival": {"iataCode": "LHR", "terminal": "3", "at": "2026-05-01T19:30:00"},
+              "carrierCode": "AA",
+              "number": "100",
+              "aircraft": {"code": "777"},
+              "operating": {"carrierCode": "AA"},
+              "duration": "PT11H30M",
+              "id": "1",
+              "numberOfStops": 0,
+              "blacklistedInEU": false
+            }
+          ]
+        }
+      ],
+      "price": {
+        "currency": "USD",
+        "total": "420.50",
+        "base": "360.00",
+        "fees": [{"amount": "0.00", "type": "SUPPLIER"}, {"amount": "0.00", "type": "TICKETING"}],
+        "grandTotal": "420.50"
+      },
+      "pricingOptions": {"fareType": ["PUBLISHED"], "includedCheckedBagsOnly": true},
+      "validatingAirlineCodes": ["AA"],
+      "travelerPricings": [
+        {
+          "travelerId": "1",
+          "fareOption": "STANDARD",
+          "travelerType": "ADULT",
+          "price": {"currency": "USD", "total": "420.50", "base": "360.00"},
+          "fareDetailsBySegment": [
+            {
+              "segmentId": "1",
+              "cabin": "ECONOMY",
+              "fareBasis": "OLXOA",
+              "class": "O",
+              "includedCheckedBags": {"quantity": 1}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "flight-offer",
+      "id": "2",
+      "source": "GDS",
+      "oneWay": false,
+      "numberOfBookableSeats": 9,
+      "itineraries": [
+        {
+          "duration": "PT13H45M",
+          "segments": [
+            {
+              "departure": {"iataCode": "JFK", "at": "2026-05-01T17:00:00"},
+              "arrival": {"iataCode": "CDG", "at": "2026-05-02T06:20:00"},
+              "carrierCode": "AF",
+              "number": "23",
+              "aircraft": {"code": "77W"},
+              "operating": {"carrierCode": "DL"},
+              "duration": "PT7H20M",
+              "id": "2",
+              "numberOfStops": 0
+            },
+            {
+              "departure": {"iataCode": "CDG", "at": "2026-05-02T09:00:00"},
+              "arrival": {"iataCode": "LHR", "at": "2026-05-02T09:15:00"},
+              "carrierCode": "AF",
+              "number": "1280",
+              "aircraft": {"code": "320"},
+              "operating": {"carrierCode": "AF"},
+              "duration": "PT1H15M",
+              "id": "3",
+              "numberOfStops": 0
+            }
+          ]
+        }
+      ],
+      "price": {"currency": "USD", "total": "389.00", "base": "310.00", "grandTotal": "389.00"},
+      "travelerPricings": [
+        {
+          "travelerId": "1",
+          "fareOption": "STANDARD",
+          "travelerType": "ADULT",
+          "fareDetailsBySegment": [
+            {"segmentId": "2", "cabin": "ECONOMY", "fareBasis": "VLXOW", "class": "V"},
+            {"segmentId": "3", "cabin": "ECONOMY", "fareBasis": "VLXOW", "class": "V"}
+          ]
+        }
+      ]
+    }
+  ],
+  "dictionaries": {
+    "locations": {
+      "JFK": {"cityCode": "NYC", "countryCode": "US"},
+      "LHR": {"cityCode": "LON", "countryCode": "GB"},
+      "CDG": {"cityCode": "PAR", "countryCode": "FR"}
+    },
+    "aircraft": {"777": "BOEING 777", "77W": "BOEING 777-300ER", "320": "AIRBUS A320"},
+    "currencies": {"USD": "US DOLLAR"},
+    "carriers": {"AA": "AMERICAN AIRLINES", "AF": "AIR FRANCE", "DL": "DELTA AIR LINES"}
+  }
+}
