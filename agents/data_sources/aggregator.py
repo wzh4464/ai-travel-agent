@@ -34,9 +34,11 @@ def _dedupe(flights: list[dict]) -> list[dict]:
         legs = flight.get('legs') or []
         if not legs:
             continue
+        # Airline strings are not canonical across providers (Amadeus uses
+        # display names, Kiwi uses 2-letter codes), so they're deliberately
+        # excluded — flight_number already encodes the carrier code prefix.
         leg_sequence = tuple(
             (
-                leg.get('airline'),
                 leg.get('flight_number'),
                 leg.get('departure_airport'),
                 leg.get('departure_time'),
@@ -123,12 +125,20 @@ class AggregatedFlightSource(BaseFlightSource):
 
         results: list[dict] = []
         errors: list[tuple[str, Exception]] = []
+        succeeded: set[str] = set()
         with ThreadPoolExecutor(max_workers=min(4, len(active))) as pool:
             future_to_source = {pool.submit(s.search, **kwargs): s for s in active}
             for future in as_completed(future_to_source):
                 source = future_to_source[future]
                 try:
-                    results.extend(future.result() or [])
+                    payload = future.result() or []
+                    succeeded.add(source.name)
+                    results.extend(payload)
+                except NoResultsError as exc:
+                    # A clean "no flights" answer still counts as a successful
+                    # roundtrip for the purpose of "did anyone respond?".
+                    succeeded.add(source.name)
+                    errors.append((source.name, exc))
                 except TravelAgentError as exc:
                     errors.append((source.name, exc))
                 except Exception as exc:  # pylint: disable=broad-except
@@ -137,15 +147,13 @@ class AggregatedFlightSource(BaseFlightSource):
         if results:
             return _dedupe(results)
 
-        # Every source returned nothing.
-        # Case 1: an upstream returned an empty list rather than raising
-        #         NoResultsError — that's still "no flights", not a failure.
-        if not errors:
+        # No flights came back from anyone. Decide whether that's a clean
+        # "no results" answer or an upstream outage.
+        if succeeded:
+            # At least one source responded successfully (with [] or
+            # NoResultsError). The route legitimately has no flights —
+            # even if other sources errored, we have a real answer.
             raise NoResultsError(origin, destination, outbound_date)
-        # Case 2: every source actually raised NoResultsError.
-        if all(isinstance(err, NoResultsError) for _, err in errors):
-            raise NoResultsError(origin, destination, outbound_date)
-        # Case 3: at least one real upstream failure.
         summary = '; '.join(f'{name}: {err}' for name, err in errors)
         raise UpstreamAPIError(self.name, detail=f'all sources failed ({summary})')
 
