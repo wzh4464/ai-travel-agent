@@ -32,6 +32,41 @@ _ = load_dotenv()
 CURRENT_YEAR = datetime.datetime.now().year
 
 
+def _strip_raw(obj: Any) -> Any:
+    """Recursively drop ``raw`` keys from dicts inside ``obj``.
+
+    Flight dicts coming out of the normalizers preserve the upstream
+    provider blob under ``raw`` for downstream tools that need to inspect
+    fare-rule fine print or booking deep links. The LLM context, however,
+    should never see those blobs: they routinely carry passenger PII,
+    Authorization-bearing error messages, and other untrusted strings.
+    """
+    if isinstance(obj, dict):
+        return {k: _strip_raw(v) for k, v in obj.items() if k != 'raw'}
+    if isinstance(obj, list):
+        return [_strip_raw(v) for v in obj]
+    return obj
+
+
+def _scrub_tool_result(result: Any) -> Any:
+    """Apply PII scrubbing + ``raw``-stripping to a tool's return value.
+
+    Dict / list payloads are walked with :func:`scrub_mapping` so emails,
+    phone numbers, bearer tokens, and credential-shaped keys are redacted
+    before the value is JSON-encoded into the LLM context. Scalar values
+    pass through unchanged (they're coerced via ``str()`` at the call
+    site).
+    """
+    if isinstance(result, dict):
+        return scrub_mapping(_strip_raw(result))
+    if isinstance(result, list):
+        stripped = _strip_raw(result)
+        # Wrap the list so scrub_mapping's recursive helpers can do their
+        # job, then unwrap. Keeps a single recursion entry point.
+        return scrub_mapping({'_': stripped})['_']
+    return result
+
+
 class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], operator.add]
     dialog: DialogState
@@ -254,11 +289,17 @@ class Agent:
                 except Exception as exc:  # pylint: disable=broad-except
                     result = degrade(exc)
             # JSON-encode so the LLM can inspect status/error_type/user_message
-            # rather than parsing a flattened Python repr.
-            if isinstance(result, (dict, list)):
-                content = json.dumps(result, default=str, ensure_ascii=False)
+            # rather than parsing a flattened Python repr. Scrub before
+            # encoding — upstream Flight payloads carry a ``raw`` provider
+            # blob that frequently contains passenger emails, phone numbers,
+            # and Authorization-bearing error messages. Dropping ``raw``
+            # (where present) keeps tool responses lean and eliminates a
+            # class of PII leakage into the LLM context.
+            scrubbed_result = _scrub_tool_result(result)
+            if isinstance(scrubbed_result, (dict, list)):
+                content = json.dumps(scrubbed_result, default=str, ensure_ascii=False)
             else:
-                content = str(result)
+                content = str(scrubbed_result)
             results.append(ToolMessage(tool_call_id=t['id'], name=t['name'], content=content))
         logger.debug('invoke_tools: handled %d tool call(s)', len(tool_calls))
         return {'messages': results}

@@ -127,7 +127,21 @@ _TO_ONLY_EN = re.compile(
     rf'(?:\s+(?:{_TERMINATORS})\b|[,.?!]|$)',
     re.I | re.U,
 )
-_FROM_TO_CN = re.compile(r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:到|飞)\s*([\u4e00-\u9fa5A-Za-z ]+?)(?:\s|，|。|$)')
+# CJK terminators mirror _TERMINATORS in spirit: words that should *end* a
+# city-name capture so we don't glue date / cabin / preference markers onto
+# the destination (e.g. "从北京到东京下周一" must capture "东京", not
+# "东京下周一"). Kept as a separate alternation because the CJK regex relies
+# on character-class boundaries rather than \b word boundaries.
+_CN_CITY_TERMINATORS = (
+    r'下周|本周|这周|明天|后天|今天|早上|中午|晚上|'
+    r'直飞|直达|经济|商务|头等|便宜|最便宜|往返|单程|'
+    r'含|带|从|不要|不经|避免|月|号|日'
+)
+_FROM_TO_CN = re.compile(
+    r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:到|飞)\s*'
+    r'([\u4e00-\u9fa5A-Za-z ]+?)'
+    rf'(?=\s|，|。|,|\.|$|{_CN_CITY_TERMINATORS}|\d)'
+)
 _ADULTS_EN = re.compile(r'(\d+)\s+(?:adult|passenger|people|pax)', re.I)
 _ADULTS_CN = re.compile(r'(\d+)\s*(?:人|名乘客|位)')
 _CABIN_WORDS = {

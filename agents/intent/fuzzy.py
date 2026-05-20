@@ -112,10 +112,17 @@ def interpret_price_preference(text: str) -> Optional[dict]:
         return None
     s = text.lower()
 
-    # Price-first phrases: "500美元以内", "800元以下", "$500 or less"
-    m = re.search(r'\$?(\d+)\s*(?:美元|元|块|rmb|usd)?\s*(?:以内|以下|左右|or less)', s)
+    # Hard-ceiling phrases: "500美元以内", "800元以下", "$500 or less".
+    # These genuinely mean "at most" and bind to max_price.
+    m = re.search(r'\$?(\d+)\s*(?:美元|元|块|rmb|usd)?\s*(?:以内|以下|or less)', s)
     if m:
         return {'max_price': float(m.group(1))}
+    # Soft / approximate phrases: "500美元左右", "800元左右".
+    # 左右 means "approximately" in Chinese, NOT "at most" — treating it as
+    # a hard ceiling caused us to discard valid offers a few dollars above
+    # the user's budget hint. Map it to a sort hint instead.
+    if re.search(r'\$?\d+\s*(?:美元|元|块|rmb|usd|dollars?)?\s*左右', s):
+        return {'sort_by': 'price'}
     # Keyword-first phrases: "under $500", "below 800", "<= 800"
     m = re.search(r'(?:under|below|<=?)\s*\$?(\d+)', s)
     if m:
