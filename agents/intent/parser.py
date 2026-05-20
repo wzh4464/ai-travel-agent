@@ -24,9 +24,12 @@ class TravelIntent:
     destination_code: Optional[str] = None
     outbound_date: Optional[str] = None
     return_date: Optional[str] = None
-    adults: int = 1
-    children: int = 0
-    cabin_class: str = 'economy'
+    # adults / cabin_class are Optional so the dialog can distinguish "user
+    # didn't say" from "user said 1 / economy". Tool-call construction layers
+    # apply the actual booking defaults via ``intent.adults or 1`` etc.
+    adults: Optional[int] = None
+    children: Optional[int] = None
+    cabin_class: Optional[str] = None
     max_stops: Optional[int] = None
     max_price: Optional[float] = None
     sort_by: Optional[str] = None
@@ -46,33 +49,26 @@ class DialogState:
         """Overlay slots resolved by ``new`` onto the tracked intent.
 
         A non-sentinel value from ``new`` always replaces the tracked slot
-        so the user can correct themselves ("actually from SFO" after an
-        earlier "from LAX"). Sentinel / unset values are skipped so a
-        later turn that omits a date does not clobber an earlier one.
+        so the user can correct themselves — "actually from SFO" after an
+        earlier "from LAX", "actually economy" after "business", or
+        "actually 1 adult" after "3 adults". The only fields with a
+        non-None default are ``children`` (0 = "no children", a real
+        answer) and ``max_stops`` (None default, but 0 = non-stop is a
+        real preference).
 
-        For ``cabin_class`` and ``adults`` the dataclass defaults
-        ('economy' / 1) double as the "user didn't say" sentinel because
-        ``TravelIntent`` cannot carry None for those typed fields. The
-        downside is that a user who explicitly says "actually economy"
-        after picking business cannot heuristically downgrade; the LLM
-        layer is expected to handle that case.
+        Sentinel / unset values are skipped so a later turn that omits a
+        date does not clobber an earlier one.
         """
         for key, value in new.as_dict().items():
             # max_stops=0 is a real preference (non-stop); only None is unset.
             if key == 'max_stops':
                 if value is None:
                     continue
-            elif key == 'cabin_class':
-                # 'economy' is the dataclass default — treat it as unset so a
-                # later turn that omitted the cabin doesn't clobber an
-                # earlier 'business' choice.
-                if value in (None, '', 'economy'):
-                    continue
-            elif key == 'adults':
-                # 1 is the dataclass default — same reasoning as cabin_class.
-                if not value or value < 1 or value == 1:
-                    continue
-            elif value in (None, 0, ''):
+            # Every other field is Optional or empty-string-defaulted;
+            # treat None and '' as the only unset values. Concrete values
+            # always override so users can correct themselves ("actually
+            # economy", "actually 1 adult").
+            elif value in (None, ''):
                 continue
             setattr(self.intent, key, value)
 
