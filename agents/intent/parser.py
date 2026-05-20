@@ -14,8 +14,6 @@ from agents.intent.fuzzy import (
 from agents.intent.iata import lookup as lookup_airport_code
 from agents.regions import (
     REGION_CJK_ALIASES,
-    REGIONS,
-    TRANSIT_CJK_ALIASES,
     TRANSIT_BLACKLISTS,
 )
 
@@ -210,7 +208,7 @@ def _extract_pax(text: str) -> int:
     return 1
 
 
-# Region phrases: CJK aliases go first so "欧洲" wins over "europe".
+# Region phrases: match the longest alias first so broader substrings do not shadow it.
 _REGION_EN_KEYWORDS: dict[str, str] = {
     'europe': 'europe',
     'western europe': 'western_europe',
@@ -224,9 +222,9 @@ def _extract_region(text: str) -> Optional[str]:
     """Return a canonical region key if one is mentioned, else None."""
     if not text:
         return None
-    for phrase, canonical in REGION_CJK_ALIASES.items():
+    for phrase in sorted(REGION_CJK_ALIASES, key=len, reverse=True):
         if phrase in text:
-            return canonical
+            return REGION_CJK_ALIASES[phrase]
     lowered = text.lower()
     # Prefer the longest phrase so "western europe" beats "europe".
     for phrase in sorted(_REGION_EN_KEYWORDS, key=len, reverse=True):

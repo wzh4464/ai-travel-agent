@@ -99,6 +99,7 @@ class AggregatedFlightSource(BaseFlightSource):
         infants_on_lap: int = 0,
         cabin_class: str = 'economy',
         max_stops: int | None = None,
+        parallel: bool = True,
     ) -> list[dict]:
         active = self.active_sources()
         if not active:
@@ -123,12 +124,21 @@ class AggregatedFlightSource(BaseFlightSource):
 
         results: list[dict] = []
         errors: list[tuple[str, Exception]] = []
-        with ThreadPoolExecutor(max_workers=min(4, len(active))) as pool:
-            future_to_source = {pool.submit(s.search, **kwargs): s for s in active}
-            for future in as_completed(future_to_source):
-                source = future_to_source[future]
+        if parallel:
+            with ThreadPoolExecutor(max_workers=min(4, len(active))) as pool:
+                futures = {pool.submit(s.search, **kwargs): s for s in active}
+                for future in as_completed(futures):
+                    source = futures[future]
+                    try:
+                        results.extend(future.result() or [])
+                    except TravelAgentError as exc:
+                        errors.append((source.name, exc))
+                    except Exception as exc:  # pylint: disable=broad-except
+                        errors.append((source.name, UpstreamAPIError(source.name, detail=str(exc))))
+        else:
+            for source in active:
                 try:
-                    results.extend(future.result() or [])
+                    results.extend(source.search(**kwargs) or [])
                 except TravelAgentError as exc:
                     errors.append((source.name, exc))
                 except Exception as exc:  # pylint: disable=broad-except

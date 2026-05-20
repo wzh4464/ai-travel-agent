@@ -29,7 +29,8 @@ from typing import Any, List, Optional
 
 from agents._pydantic_compat import BaseModel, Field
 from agents.data_sources import get_default_aggregator
-from agents.errors import MissingParameterError, NoResultsError, TravelAgentError, UpstreamAPIError, degrade
+from agents.data_sources.aggregator import AggregatedFlightSource
+from agents.errors import InvalidParameterError, MissingParameterError, NoResultsError, TravelAgentError, degrade
 from agents.presentation.itinerary import (
     format_open_jaw_combinations,
     rank_open_jaw_combinations,
@@ -144,11 +145,14 @@ def _fan_out(
         futures = {
             pool.submit(
                 source.search,
-                origin=origin,
-                destination=destination,
-                outbound_date=date,
-                adults=adults,
-                cabin_class=cabin,
+                **{
+                    'origin': origin,
+                    'destination': destination,
+                    'outbound_date': date,
+                    'adults': adults,
+                    'cabin_class': cabin,
+                    **({'parallel': False} if isinstance(source, AggregatedFlightSource) else {}),
+                },
             ): (origin, destination)
             for origin, destination in pairs
         }
@@ -189,8 +193,10 @@ def open_jaw_search(params: OpenJawInput) -> dict[str, Any]:
     destinations = _resolve_destinations(params.destination_region)
     if not destinations:
         return degrade(
-            MissingParameterError(
-                [f"destination_region '{params.destination_region}' could not be expanded"]
+            InvalidParameterError(
+                'destination_region',
+                params.destination_region,
+                reason='could not be expanded into known regions or IATA airport codes',
             )
         )
 

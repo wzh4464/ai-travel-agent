@@ -10,7 +10,6 @@ from agents.presentation.itinerary import (
     rank_open_jaw_combinations,
 )
 from agents.presentation.sorting import (
-    _touches_banned_transit,
     filter_flights,
     sort_flights,
 )
@@ -18,7 +17,6 @@ from agents.presentation.sorting import (
 __all__ = [
     'filter_flights',
     'sort_flights',
-    '_touches_banned_transit',
     'format_card',
     'format_comparison_table',
     'format_flight_list',
