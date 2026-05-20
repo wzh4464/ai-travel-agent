@@ -7,6 +7,7 @@ sorting, filtering, and comparison tools never depend on upstream quirks.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import re
@@ -74,6 +75,47 @@ def _coerce_price(raw_price) -> float:
         return 0.0
 
 
+# Anchored at both ends so we don't silently accept (and mis-parse) values
+# like ``PT1H30M45S`` as 90 minutes. Days are honoured for multi-day
+# itineraries (P1DT2H30M); seconds are truncated to whole minutes (45s
+# becomes 0 minutes — close enough for itinerary durations).
+_ISO_DURATION = re.compile(
+    r'^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$',
+    re.IGNORECASE,
+)
+
+
+def _parse_iso_duration(value: str) -> int:
+    """Parse an ISO 8601 duration like ``PT10H30M`` or ``P1DT2H`` into minutes."""
+    if not value:
+        return 0
+    m = _ISO_DURATION.match(value.strip())
+    if not m:
+        return 0
+    days = int(m.group(1) or 0)
+    hours = int(m.group(2) or 0)
+    mins = int(m.group(3) or 0)
+    secs = int(m.group(4) or 0)
+    return days * 24 * 60 + hours * 60 + mins + secs // 60
+
+
+def _minutes_between(start: str, end: str) -> int:
+    """Best-effort minute diff between two ISO timestamps.
+
+    Falls back to 0 if either side is missing, unparseable, or if one side
+    is timezone-aware while the other is naive (which would otherwise raise
+    TypeError on subtraction).
+    """
+    if not start or not end:
+        return 0
+    try:
+        a = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
+        b = datetime.datetime.fromisoformat(end.replace('Z', '+00:00'))
+        return max(0, int((b - a).total_seconds() // 60))
+    except (ValueError, TypeError):
+        return 0
+
+
 def normalize_serpapi(raw: dict, provider: str = 'serpapi-google-flights') -> Flight:
     """Convert one SerpAPI google_flights ``best_flights`` item into a Flight."""
     legs_raw = raw.get('flights', []) or []
@@ -107,4 +149,128 @@ def normalize_serpapi(raw: dict, provider: str = 'serpapi-google-flights') -> Fl
         booking_url='https://www.google.com/flights',
         provider=provider,
         raw=raw,
+    )
+
+
+def normalize_amadeus(
+    offer: dict,
+    carriers: dict[str, str] | None = None,
+    provider: str = 'amadeus',
+) -> Flight:
+    """Convert one Amadeus ``flight-offers`` entry into a canonical Flight.
+
+    ``carriers`` is the ``dictionaries.carriers`` map from the Amadeus
+    response — it translates a 2-letter carrier code into a display name.
+    """
+    carriers = carriers or {}
+    itineraries = offer.get('itineraries', []) or []
+    # Flatten segments across every itinerary so round-trip return legs are
+    # not silently dropped. ``stops`` reports the worst-case per-itinerary
+    # count: a one-stop outbound paired with a non-stop return reads as
+    # "1 stop" so the user is not misled into thinking the whole booking
+    # is non-stop.
+    segments: list[dict] = []
+    per_itin_stops: list[int] = []
+    for itin in itineraries:
+        itin_segments = itin.get('segments', []) or []
+        segments.extend(itin_segments)
+        per_itin_stops.append(max(0, len(itin_segments) - 1))
+
+    # Cabin class lives on travelerPricings[0].fareDetailsBySegment[i].cabin
+    fare_details = []
+    tps = offer.get('travelerPricings') or []
+    if tps:
+        fare_details = tps[0].get('fareDetailsBySegment', []) or []
+
+    legs: list[FlightLeg] = []
+    for i, seg in enumerate(segments):
+        carrier_code = seg.get('carrierCode', '') or ''
+        cabin = ''
+        if i < len(fare_details):
+            cabin = (fare_details[i].get('cabin') or '').lower()
+        legs.append(
+            FlightLeg(
+                airline=carriers.get(carrier_code, carrier_code),
+                flight_number=f'{carrier_code}{seg.get("number", "")}',
+                departure_airport=(seg.get('departure') or {}).get('iataCode', ''),
+                departure_time=(seg.get('departure') or {}).get('at', ''),
+                arrival_airport=(seg.get('arrival') or {}).get('iataCode', ''),
+                arrival_time=(seg.get('arrival') or {}).get('at', ''),
+                duration_minutes=_parse_iso_duration(seg.get('duration', '')),
+                aircraft=(seg.get('aircraft') or {}).get('code', ''),
+                cabin_class=cabin,
+            )
+        )
+
+    price_block = offer.get('price') or {}
+    total_duration = sum(
+        _parse_iso_duration((it.get('duration', '') or '')) for it in itineraries
+    )
+    return Flight(
+        flight_id=str(offer.get('id') or _stable_id(offer)),
+        price=float(price_block.get('total', 0) or 0),
+        currency=price_block.get('currency', 'USD') or 'USD',
+        total_duration_minutes=total_duration,
+        stops=max(per_itin_stops) if per_itin_stops else 0,
+        legs=legs,
+        airline_logo='',
+        booking_url='',  # Amadeus Self-Service has no direct deep link; use booking API
+        provider=provider,
+        raw=offer,
+    )
+
+
+def normalize_kiwi(offer: dict, provider: str = 'kiwi') -> Flight:
+    """Convert one Kiwi Tequila ``/v2/search`` item into a canonical Flight."""
+    route = offer.get('route', []) or []
+    legs: list[FlightLeg] = []
+    # Track the per-direction segment count so ``stops`` matches the
+    # worst-case direction. Kiwi marks outbound segments with return=0 and
+    # the return leg with return=1; falling back to a single bucket when
+    # the field is absent keeps one-way offers consistent.
+    per_direction: dict[int, int] = {}
+    for seg in route:
+        airline = seg.get('airline', '') or ''
+        dep = seg.get('local_departure') or seg.get('utc_departure') or ''
+        arr = seg.get('local_arrival') or seg.get('utc_arrival') or ''
+        direction = int(seg.get('return') or 0)
+        per_direction[direction] = per_direction.get(direction, 0) + 1
+        legs.append(
+            FlightLeg(
+                airline=airline,
+                flight_number=f'{airline}{seg.get("flight_no", "")}',
+                departure_airport=seg.get('flyFrom', '') or '',
+                departure_time=dep,
+                arrival_airport=seg.get('flyTo', '') or '',
+                arrival_time=arr,
+                duration_minutes=_minutes_between(dep, arr),
+                aircraft=seg.get('equipment', '') or '',
+                cabin_class='',
+            )
+        )
+
+    duration_block = offer.get('duration') or {}
+    total_seconds = duration_block.get('total') or 0
+    try:
+        total_minutes = int(total_seconds) // 60
+    except (TypeError, ValueError):
+        total_minutes = 0
+
+    # Per-direction worst-case stop count (matches normalize_amadeus). A
+    # round-trip with two non-stop legs reads as 0 stops, not 1.
+    stops = max(
+        (max(0, count - 1) for count in per_direction.values()),
+        default=max(0, len(legs) - 1),
+    )
+    return Flight(
+        flight_id=str(offer.get('id') or _stable_id(offer)),
+        price=float(offer.get('price', 0) or 0),
+        currency='USD',
+        total_duration_minutes=total_minutes,
+        stops=stops,
+        legs=legs,
+        airline_logo='',
+        booking_url=offer.get('deep_link', '') or '',
+        provider=provider,
+        raw=offer,
     )
