@@ -19,7 +19,6 @@ from __future__ import annotations
 import io
 import json
 from contextlib import contextmanager
-from http.client import HTTPException
 from typing import Any, Iterator
 from unittest.mock import patch
 from urllib.error import HTTPError

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import datetime
-
 from agents.intent.parser import (
     DialogState,
     TravelIntent,
