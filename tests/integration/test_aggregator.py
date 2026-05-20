@@ -20,7 +20,12 @@ from agents.errors import NoResultsError, UpstreamAPIError
 def _mk_flight(provider: str, price: float, *, flight_id: str = 'x',
                dep_time: str = '2026-05-01T08:00:00',
                arr_time: str = '2026-05-01T20:00:00',
-               airline: str = 'AA') -> dict:
+               airline: str = 'AA',
+               flight_number: str | None = None) -> dict:
+    # Real adapters always set flight_number as ``f"{carrier_code}{number}"``;
+    # default it from the airline so the dedupe key remains discriminative.
+    if flight_number is None:
+        flight_number = f'{airline}100'
     return {
         'flight_id': flight_id,
         'price': price,
@@ -33,6 +38,7 @@ def _mk_flight(provider: str, price: float, *, flight_id: str = 'x',
             'arrival_airport': 'LHR',
             'arrival_time': arr_time,
             'airline': airline,
+            'flight_number': flight_number,
         }],
         'provider': provider,
     }

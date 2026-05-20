@@ -105,12 +105,17 @@ def interpret_fuzzy_date(
         return DateRange(start=_fmt(last))
 
     # "next monday" / "下周一"
-    for table in (_WEEKDAY_EN, _WEEKDAY_CN):
+    for table_idx, table in enumerate((_WEEKDAY_EN, _WEEKDAY_CN)):
+        is_chinese = table_idx == 1
         for key, idx in table.items():
             if key in s:
                 offset = (idx - today.weekday()) % 7
                 offset = offset or 7  # always forward
-                if 'next' in s or '下' in s:
+                # Chinese "下周一" already lands on next week's Monday via the
+                # upcoming-weekday calculation (周一 always points at the next
+                # occurrence). Only the English "next monday" idiom genuinely
+                # means "the Monday after the upcoming one".
+                if not is_chinese and 'next' in s:
                     offset += 7
                 return DateRange(start=_fmt(today + datetime.timedelta(days=offset)))
 

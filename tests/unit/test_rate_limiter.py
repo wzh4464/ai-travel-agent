@@ -9,14 +9,19 @@ from agents.data_sources.base import RateLimiter
 
 
 class TestRateLimiter:
-    def test_burst_is_free(self):
-        """Acquiring up to the burst size should not block."""
+    def test_burst_is_free(self, monkeypatch):
+        """Acquiring up to the burst size must never sleep — checked
+        by asserting :func:`time.sleep` is not invoked, so the test is
+        deterministic on slow / contended CI runners."""
         rl = RateLimiter(rate_per_second=100, burst=5)
-        start = time.monotonic()
+        sleep_calls: list[float] = []
+        monkeypatch.setattr(
+            'agents.data_sources.base.time.sleep',
+            lambda secs: sleep_calls.append(secs),
+        )
         for _ in range(5):
             rl.acquire()
-        elapsed = time.monotonic() - start
-        assert elapsed < 0.05
+        assert sleep_calls == []
 
     def test_blocks_once_burst_exhausted(self):
         rl = RateLimiter(rate_per_second=10, burst=2)
