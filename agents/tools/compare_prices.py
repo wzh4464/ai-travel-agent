@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from langchain.pydantic_v1 import BaseModel, Field
+from agents._pydantic_compat import BaseModel, Field
 from langchain_core.tools import tool
 
 from agents.presentation.sorting import filter_flights, sort_flights
