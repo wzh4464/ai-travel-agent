@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agents.errors import (
     AmbiguousInputError,
+    InvalidParameterError,
     MissingParameterError,
     NoResultsError,
     RateLimitedError,
@@ -16,6 +17,7 @@ from agents.errors import (
 class TestErrorHierarchy:
     def test_all_inherit_from_base(self):
         assert issubclass(MissingParameterError, TravelAgentError)
+        assert issubclass(InvalidParameterError, TravelAgentError)
         assert issubclass(AmbiguousInputError, TravelAgentError)
         assert issubclass(UpstreamAPIError, TravelAgentError)
         assert issubclass(RateLimitedError, UpstreamAPIError)
@@ -38,6 +40,12 @@ class TestDegrade:
         assert payload['status'] == 'error'
         assert payload['error_type'] == 'MissingParameterError'
         assert 'outbound_date' in payload['user_message']
+
+    def test_invalid_parameter_shape(self):
+        payload = degrade(InvalidParameterError('destination_region', 'atlantis'))
+        assert payload['status'] == 'error'
+        assert payload['error_type'] == 'InvalidParameterError'
+        assert 'destination_region' in payload['user_message']
 
     def test_upstream_error_scrubs_free_form_details(self):
         # Embed an email in the upstream error — should not reach the LLM.

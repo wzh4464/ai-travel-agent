@@ -5,10 +5,12 @@ from agents.tools.compare_prices import compare_prices
 from agents.tools.flight_details import get_flight_details
 from agents.tools.flights_finder import flights_finder
 from agents.tools.hotels_finder import hotels_finder
+from agents.tools.open_jaw import open_jaw_search
 from agents.tools.seat_availability import check_seat_availability
 
 FLIGHT_TOOLS = [
     flights_finder,
+    open_jaw_search,
     get_flight_details,
     compare_prices,
     check_seat_availability,
@@ -19,6 +21,7 @@ ALL_TOOLS = FLIGHT_TOOLS + [hotels_finder]
 
 __all__ = [
     'flights_finder',
+    'open_jaw_search',
     'get_flight_details',
     'compare_prices',
     'check_seat_availability',

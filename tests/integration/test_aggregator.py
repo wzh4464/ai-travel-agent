@@ -143,6 +143,14 @@ class TestAggregatorSearch:
         assert all(f['provider'] == 's2' for f in results)
         assert s1.calls == []
 
+    def test_parallel_can_be_disabled(self):
+        s1 = _StubSource('s1', flights=[_mk_flight('s1', 500, airline='AA')])
+        s2 = _StubSource('s2', flights=[_mk_flight('s2', 400, airline='BA')])
+        agg = AggregatedFlightSource([s1, s2])
+        results = agg.search(origin='JFK', destination='LHR', outbound_date='2026-05-01', parallel=False)
+        assert len(results) == 2
+        assert {f['provider'] for f in results} == {'s1', 's2'}
+
     def test_no_configured_sources_raises(self):
         s1 = _StubSource('s1', configured=False)
         agg = AggregatedFlightSource([s1])

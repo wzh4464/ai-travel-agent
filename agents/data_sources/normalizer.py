@@ -274,3 +274,67 @@ def normalize_kiwi(offer: dict, provider: str = 'kiwi') -> Flight:
         provider=provider,
         raw=offer,
     )
+
+
+def normalize_duffel(offer: dict, provider: str = 'duffel') -> Flight:
+    """Convert a Duffel Air offer into a canonical Flight.
+
+    Duffel structures responses as ``offer -> slices[] -> segments[]``.
+    * A one-way search returns a single slice with one or more segments
+      (one segment per carrier leg, including intermediate stops).
+    * A round-trip search returns two slices (outbound + return).
+    * Per-segment cabin class is stored in ``segment.passengers[0].cabin_class``.
+
+    Since the canonical :class:`Flight` shape flattens everything into a
+    single ``legs`` list, we collapse segments from every slice. The
+    original slice boundaries remain accessible via ``raw['slices']`` for
+    callers that need to split the itinerary back into outbound/return.
+    """
+    slices = offer.get('slices', []) or []
+
+    legs: list[FlightLeg] = []
+    per_slice_stops: list[int] = []
+    for slice_obj in slices:
+        segments = slice_obj.get('segments', []) or []
+        per_slice_stops.append(max(0, len(segments) - 1))
+        for seg in segments:
+            carrier = seg.get('marketing_carrier') or {}
+            carrier_code = carrier.get('iata_code') or ''
+            carrier_name = carrier.get('name') or carrier_code
+            flight_no = seg.get('marketing_carrier_flight_number') or ''
+
+            cabin = ''
+            pax_list = seg.get('passengers') or []
+            if pax_list:
+                cabin = (pax_list[0].get('cabin_class') or '').lower()
+
+            legs.append(
+                FlightLeg(
+                    airline=carrier_name,
+                    flight_number=f'{carrier_code}{flight_no}',
+                    departure_airport=(seg.get('origin') or {}).get('iata_code', ''),
+                    departure_time=seg.get('departing_at', ''),
+                    arrival_airport=(seg.get('destination') or {}).get('iata_code', ''),
+                    arrival_time=seg.get('arriving_at', ''),
+                    duration_minutes=_parse_iso_duration(seg.get('duration', '')),
+                    aircraft=(seg.get('aircraft') or {}).get('iata_code', ''),
+                    cabin_class=cabin,
+                )
+            )
+
+    total_minutes = sum(_parse_iso_duration(sl.get('duration', '')) for sl in slices)
+
+    return Flight(
+        flight_id=str(offer.get('id') or _stable_id(offer)),
+        price=float(offer.get('total_amount', 0) or 0),
+        currency=offer.get('total_currency') or 'USD',
+        total_duration_minutes=total_minutes,
+        # Reported stops is the worst slice, so "1 stop" correctly
+        # describes a round-trip with a non-stop return and a 1-stop outbound.
+        stops=max(per_slice_stops) if per_slice_stops else 0,
+        legs=legs,
+        airline_logo='',
+        booking_url='',  # Duffel bookings happen via the Orders API, not a deep link
+        provider=provider,
+        raw=offer,
+    )

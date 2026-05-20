@@ -12,6 +12,7 @@ from agents.data_sources.normalizer import (
     _minutes_between,
     _parse_iso_duration,
     normalize_amadeus,
+    normalize_duffel,
     normalize_kiwi,
     normalize_serpapi,
 )
@@ -159,3 +160,101 @@ class TestKiwiNormalizer:
         }
         flight = normalize_kiwi(offer).to_dict()
         assert flight['total_duration_minutes'] == 0
+
+
+class TestDuffelNormalizer:
+    def test_non_stop_offer(self, duffel_offer_request_fixture):
+        offer = duffel_offer_request_fixture['data']['offers'][0]
+        flight = normalize_duffel(offer).to_dict()
+
+        assert flight['provider'] == 'duffel'
+        assert flight['flight_id'] == 'off_0000AaaaNonstop'
+        assert flight['price'] == 5480.0
+        assert flight['currency'] == 'HKD'
+        assert flight['total_duration_minutes'] == 13 * 60
+        assert flight['stops'] == 0
+
+        leg = flight['legs'][0]
+        assert leg['airline'] == 'Cathay Pacific'
+        assert leg['flight_number'] == 'CX261'
+        assert leg['departure_airport'] == 'HKG'
+        assert leg['arrival_airport'] == 'CDG'
+        assert leg['cabin_class'] == 'economy'
+        assert leg['aircraft'] == '77W'
+
+    def test_one_stop_via_dxb(self, duffel_offer_request_fixture):
+        offer = duffel_offer_request_fixture['data']['offers'][1]
+        flight = normalize_duffel(offer).to_dict()
+
+        assert flight['flight_id'] == 'off_0000AbbbVaDXB'
+        assert flight['price'] == 4820.0
+        assert flight['stops'] == 1
+        assert len(flight['legs']) == 2
+        # Intermediate stop is DXB
+        assert flight['legs'][0]['arrival_airport'] == 'DXB'
+        assert flight['legs'][1]['departure_airport'] == 'DXB'
+
+    def test_multi_slice_round_trip_reports_worst_slice_stops(self):
+        """A round-trip with a non-stop return and a 1-stop outbound should
+        report ``stops = 1`` (the worst leg), not 0 and not 2."""
+        offer = {
+            'id': 'rt',
+            'total_amount': '1000.00',
+            'total_currency': 'USD',
+            'slices': [
+                {
+                    'duration': 'PT5H',
+                    'segments': [
+                        {
+                            'origin': {'iata_code': 'A'},
+                            'destination': {'iata_code': 'B'},
+                            'departing_at': '', 'arriving_at': '', 'duration': 'PT2H30M',
+                            'marketing_carrier': {'iata_code': 'XX'},
+                            'marketing_carrier_flight_number': '1',
+                            'passengers': [{'cabin_class': 'economy'}],
+                        },
+                        {
+                            'origin': {'iata_code': 'B'},
+                            'destination': {'iata_code': 'C'},
+                            'departing_at': '', 'arriving_at': '', 'duration': 'PT2H30M',
+                            'marketing_carrier': {'iata_code': 'XX'},
+                            'marketing_carrier_flight_number': '2',
+                            'passengers': [{'cabin_class': 'economy'}],
+                        },
+                    ],
+                },
+                {
+                    'duration': 'PT5H',
+                    'segments': [
+                        {
+                            'origin': {'iata_code': 'C'},
+                            'destination': {'iata_code': 'A'},
+                            'departing_at': '', 'arriving_at': '', 'duration': 'PT5H',
+                            'marketing_carrier': {'iata_code': 'XX'},
+                            'marketing_carrier_flight_number': '3',
+                            'passengers': [{'cabin_class': 'economy'}],
+                        },
+                    ],
+                },
+            ],
+        }
+        flight = normalize_duffel(offer).to_dict()
+        assert flight['stops'] == 1
+        assert flight['total_duration_minutes'] == 10 * 60
+
+    def test_missing_marketing_carrier_name_falls_back_to_code(self):
+        offer = {
+            'id': 'x', 'total_amount': '0', 'total_currency': 'USD',
+            'slices': [{
+                'duration': 'PT1H',
+                'segments': [{
+                    'origin': {'iata_code': 'A'}, 'destination': {'iata_code': 'B'},
+                    'departing_at': '', 'arriving_at': '', 'duration': 'PT1H',
+                    'marketing_carrier': {'iata_code': 'ZZ'},  # no 'name'
+                    'marketing_carrier_flight_number': '99',
+                    'passengers': [],
+                }],
+            }],
+        }
+        flight = normalize_duffel(offer).to_dict()
+        assert flight['legs'][0]['airline'] == 'ZZ'
