@@ -151,7 +151,8 @@ class Agent:
         memory = MemorySaver()
         self.graph = builder.compile(checkpointer=memory, interrupt_before=['email_sender'])
 
-        print(self.graph.get_graph().draw_mermaid())
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug('graph mermaid:\n%s', self.graph.get_graph().draw_mermaid())
 
     # ------------------------------------------------------------------
     # graph nodes

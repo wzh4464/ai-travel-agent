@@ -108,7 +108,12 @@ def mock_urlopen(*modules: str) -> Iterator[FlakyURLOpen]:
     """
     mock = FlakyURLOpen()
     targets = ['urllib.request.urlopen']
-    targets.extend(f'{m}.urllib.request.urlopen' for m in modules)
+    # Cover both styles: ``import urllib.request`` (patch the module's
+    # urllib.request.urlopen reference) and ``from urllib.request import
+    # urlopen`` (patch the module-local ``urlopen`` symbol).
+    for m in modules:
+        targets.append(f'{m}.urllib.request.urlopen')
+        targets.append(f'{m}.urlopen')
     patchers = []
     for t in targets:
         try:
