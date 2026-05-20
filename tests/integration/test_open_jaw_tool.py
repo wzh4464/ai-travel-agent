@@ -283,6 +283,7 @@ class TestOpenJawEdgeCases:
             'return_date': '2026-05-03',
         })
         assert result['status'] == 'error'
+        assert result['error_type'] == 'InvalidParameterError'
 
     def test_comma_separated_iata_list_is_accepted(self, canned_aggregator):
         result = _run({

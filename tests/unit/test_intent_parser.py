@@ -109,6 +109,10 @@ class TestExtractIntentRegionAndTransit:
         intent = extract_intent('visiting northern europe next month')
         assert intent.destination_region == 'northern_europe'
 
+    def test_region_longer_cjk_phrase_wins(self):
+        intent = extract_intent('想去全欧洲旅行')
+        assert intent.destination_region == 'europe_extended'
+
     def test_no_region_when_not_mentioned(self):
         intent = extract_intent('from Beijing to Tokyo on 2026-05-01')
         assert intent.destination_region is None

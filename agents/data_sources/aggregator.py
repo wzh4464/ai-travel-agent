@@ -101,6 +101,7 @@ class AggregatedFlightSource(BaseFlightSource):
         infants_on_lap: int = 0,
         cabin_class: str = 'economy',
         max_stops: int | None = None,
+        parallel: bool = True,
     ) -> list[dict]:
         active = self.active_sources()
         if not active:
@@ -126,23 +127,36 @@ class AggregatedFlightSource(BaseFlightSource):
         results: list[dict] = []
         errors: list[tuple[str, Exception]] = []
         succeeded: set[str] = set()
-        with ThreadPoolExecutor(max_workers=min(4, len(active))) as pool:
-            future_to_source = {pool.submit(s.search, **kwargs): s for s in active}
-            for future in as_completed(future_to_source):
-                source = future_to_source[future]
-                try:
-                    payload = future.result() or []
-                    succeeded.add(source.name)
-                    results.extend(payload)
-                except NoResultsError as exc:
-                    # A clean "no flights" answer still counts as a successful
-                    # roundtrip for the purpose of "did anyone respond?".
-                    succeeded.add(source.name)
-                    errors.append((source.name, exc))
-                except TravelAgentError as exc:
-                    errors.append((source.name, exc))
-                except Exception as exc:  # pylint: disable=broad-except
-                    errors.append((source.name, UpstreamAPIError(source.name, detail=str(exc))))
+
+        def _collect(source, fn_or_future):
+            """Drain one source's outcome into the shared accumulators."""
+            try:
+                payload = fn_or_future() if callable(fn_or_future) else fn_or_future.result()
+                succeeded.add(source.name)
+                results.extend(payload or [])
+            except NoResultsError as exc:
+                # A clean "no flights" answer still counts as a successful
+                # roundtrip for the purpose of "did anyone respond?".
+                succeeded.add(source.name)
+                errors.append((source.name, exc))
+            except TravelAgentError as exc:
+                errors.append((source.name, exc))
+            except Exception as exc:  # pylint: disable=broad-except
+                errors.append(
+                    (source.name, UpstreamAPIError(source.name, detail=str(exc))),
+                )
+
+        if parallel:
+            with ThreadPoolExecutor(max_workers=min(4, len(active))) as pool:
+                futures = {pool.submit(s.search, **kwargs): s for s in active}
+                for future in as_completed(futures):
+                    _collect(futures[future], future)
+        else:
+            # Sequential mode: callers that already manage their own thread
+            # pool (e.g. open_jaw._fan_out) can disable our pool so the
+            # effective concurrency stays bounded.
+            for source in active:
+                _collect(source, lambda s=source: s.search(**kwargs))
 
         if results:
             return _dedupe(results)

@@ -29,8 +29,9 @@ from typing import Any, List, Optional
 
 from agents._pydantic_compat import BaseModel, Field
 from agents.data_sources import get_default_aggregator
+from agents.data_sources.aggregator import AggregatedFlightSource
 from agents.errors import (
-    AmbiguousInputError,
+    InvalidParameterError,
     MissingParameterError,
     NoResultsError,
     TravelAgentError,
@@ -156,11 +157,14 @@ def _fan_out(
         futures = {
             pool.submit(
                 source.search,
-                origin=origin,
-                destination=destination,
-                outbound_date=date,
-                adults=adults,
-                cabin_class=cabin,
+                **{
+                    'origin': origin,
+                    'destination': destination,
+                    'outbound_date': date,
+                    'adults': adults,
+                    'cabin_class': cabin,
+                    **({'parallel': False} if isinstance(source, AggregatedFlightSource) else {}),
+                },
             ): (origin, destination)
             for origin, destination in pairs
         }
@@ -204,9 +208,10 @@ def open_jaw_search(params: OpenJawInput) -> dict[str, Any]:
         # rather than Missing — callers can distinguish "user forgot to
         # say where" from "the region name didn't map to any cities".
         return degrade(
-            AmbiguousInputError(
+            InvalidParameterError(
                 'destination_region',
-                options=[f"unrecognised value: {params.destination_region!r}"],
+                params.destination_region,
+                reason='could not be expanded into known regions or IATA airport codes',
             )
         )
 

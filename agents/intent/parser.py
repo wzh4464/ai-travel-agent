@@ -205,7 +205,7 @@ def _extract_pax(text: str) -> int:
     return 1
 
 
-# Region phrases: CJK aliases go first so "欧洲" wins over "europe".
+# Region phrases: match the longest alias first so broader substrings do not shadow it.
 _REGION_EN_KEYWORDS: dict[str, str] = {
     'europe': 'europe',
     'western europe': 'western_europe',
