@@ -36,6 +36,27 @@ def _fmt(d: datetime.date) -> str:
     return d.isoformat()
 
 
+def _roll_to_valid_date(
+    start_year: int,
+    month: int,
+    day: int,
+    today: datetime.date,
+    *,
+    max_year: int,
+) -> Optional[datetime.date]:
+    """Construct ``datetime.date(year, month, day)``, advancing the year
+    forward when the combination is invalid (the only realistic case is
+    Feb 29 outside leap years). Gives up once ``year > max_year``.
+    """
+    year = start_year
+    while year <= max_year:
+        try:
+            return datetime.date(year, month, day)
+        except ValueError:
+            year += 1
+    return None
+
+
 def interpret_fuzzy_date(
     text: str,
     *,
@@ -56,11 +77,47 @@ def interpret_fuzzy_date(
     if iso:
         return DateRange(start=iso[0], end=iso[1] if len(iso) > 1 else None)
 
-    # Single-word phrases must match anywhere in the utterance, not just when
-    # the user typed nothing else — "fly to Tokyo tomorrow" should resolve.
+    # Compact Chinese-style short range: "4.23-5.3", "12/25-1/2", "4.23到5.3".
+    # Year defaults to the current year, rolling forward to next year if the
+    # start date has already passed. Uses _roll_to_valid_date to skip non-leap
+    # years for Feb 29 inputs.
+    compact = re.search(
+        r'(\d{1,2})[./](\d{1,2})\s*[-~到至]\s*(\d{1,2})[./](\d{1,2})',
+        s,
+    )
+    if compact:
+        try:
+            mo1, d1, mo2, d2 = (int(g) for g in compact.groups())
+            start = _roll_to_valid_date(today.year, mo1, d1, today, max_year=today.year + 5)
+            if start is None:
+                return None
+            if start < today:
+                rolled = _roll_to_valid_date(
+                    start.year + 1, mo1, d1, today, max_year=today.year + 5
+                )
+                if rolled is None:
+                    return None
+                start = rolled
+            end = _roll_to_valid_date(
+                start.year, mo2, d2, today, max_year=today.year + 6
+            )
+            if end is None:
+                return None
+            if end < start:
+                end = _roll_to_valid_date(
+                    end.year + 1, mo2, d2, today, max_year=today.year + 6
+                )
+                if end is None:
+                    return None
+            return DateRange(start=_fmt(start), end=_fmt(end))
+        except ValueError:
+            pass
+
+    # Single-word date phrases — match anywhere in the utterance (not just
+    # when the user typed nothing else) so "fly to Tokyo tomorrow" resolves.
     # English uses word boundaries; CJK doesn't have word breaks so substring
-    # matching is fine. Check the longer "day after tomorrow" first so it wins
-    # over the contained "tomorrow".
+    # matching is fine. Longer "day after tomorrow" is checked first so it
+    # wins over the contained "tomorrow".
     if re.search(r'\bday after tomorrow\b', s) or '后天' in s:
         return DateRange(start=_fmt(today + datetime.timedelta(days=2)))
     if re.search(r'\btomorrow\b', s) or '明天' in s:

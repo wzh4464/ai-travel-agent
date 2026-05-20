@@ -25,6 +25,17 @@ class MissingParameterError(TravelAgentError):
         super().__init__(msg, user_message=msg)
 
 
+class InvalidParameterError(TravelAgentError):
+    """Raised when a structured parameter is present but invalid."""
+
+    def __init__(self, field: str, value: str, reason: str | None = None):
+        self.field = field
+        self.value = value
+        suffix = f': {reason}' if reason else ''
+        msg = f"Invalid value for '{field}': {value}{suffix}"
+        super().__init__(msg, user_message=msg)
+
+
 class AmbiguousInputError(TravelAgentError):
     """Raised when user intent cannot be resolved without clarification."""
 
