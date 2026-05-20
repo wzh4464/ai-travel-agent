@@ -51,23 +51,17 @@ class DialogState:
         A non-sentinel value from ``new`` always replaces the tracked slot
         so the user can correct themselves — "actually from SFO" after an
         earlier "from LAX", "actually economy" after "business", or
-        "actually 1 adult" after "3 adults". The only fields with a
-        non-None default are ``children`` (0 = "no children", a real
-        answer) and ``max_stops`` (None default, but 0 = non-stop is a
-        real preference).
+        "actually 1 adult" after "3 adults".
 
         Sentinel / unset values are skipped so a later turn that omits a
-        date does not clobber an earlier one.
+        date does not clobber an earlier one. ``max_stops=0`` is a real
+        preference (non-stop), so its only sentinel is ``None``; every
+        other field treats ``None`` and ``''`` as unset.
         """
         for key, value in new.as_dict().items():
-            # max_stops=0 is a real preference (non-stop); only None is unset.
             if key == 'max_stops':
                 if value is None:
                     continue
-            # Every other field is Optional or empty-string-defaulted;
-            # treat None and '' as the only unset values. Concrete values
-            # always override so users can correct themselves ("actually
-            # economy", "actually 1 adult").
             elif value in (None, ''):
                 continue
             setattr(self.intent, key, value)
@@ -121,10 +115,26 @@ _TO_ONLY_EN = re.compile(
     rf'(?:\s+(?:{_TERMINATORS})\b|[,.?!]|$)',
     re.I | re.U,
 )
-_FROM_TO_CN = re.compile(r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:到|飞)\s*([\u4e00-\u9fa5A-Za-z ]+?)(?:\s|，|。|$)')
-# Origin-only CJK: "从香港出发", "从北京动身"
+# CJK terminators mirror _TERMINATORS: words that should *end* a city-name
+# capture so we don't glue date / cabin / preference markers onto the
+# destination ("从北京到东京下周一" must capture "东京", not "东京下周一").
+# Includes the origin-only verbs (出发/动身/启程/起飞) so the from→to regex
+# stops cleanly before "从X出发" — and the single-side _FROM_ONLY_CN below
+# can capture an origin without those verbs polluting it.
+_CN_CITY_TERMINATORS = (
+    r'下周|本周|这周|明天|后天|今天|早上|中午|晚上|'
+    r'直飞|直达|经济|商务|头等|便宜|最便宜|往返|单程|'
+    r'含|带|从|不要|不经|避免|月|号|日|'
+    r'出发|动身|启程|起飞'
+)
+_FROM_TO_CN = re.compile(
+    r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:到|飞)\s*'
+    r'([\u4e00-\u9fa5A-Za-z ]+?)'
+    rf'(?=\s|，|。|,|\.|$|{_CN_CITY_TERMINATORS}|\d)'
+)
+# Origin-only CJK: "从香港出发", "从北京动身".
 _FROM_ONLY_CN = re.compile(
-    r'从\s*([一-龥A-Za-z ]+?)\s*(?:出发|动身|启程|起飞)'
+    r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:出发|动身|启程|起飞)'
 )
 _ADULTS_EN = re.compile(r'(\d+)\s+(?:adult|passenger|people|pax)', re.I)
 _ADULTS_CN = re.compile(r'(\d+)\s*(?:人|名乘客|位)')

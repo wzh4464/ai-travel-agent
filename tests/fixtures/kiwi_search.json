@@ -1,0 +1,64 @@
+{
+  "search_id": "fake-search-id",
+  "currency": "USD",
+  "_results": 2,
+  "data": [
+    {
+      "id": "kw-offer-1",
+      "flyFrom": "JFK",
+      "flyTo": "LHR",
+      "cityFrom": "New York",
+      "cityTo": "London",
+      "local_departure": "2026-05-01T08:00:00.000Z",
+      "local_arrival": "2026-05-01T19:30:00.000Z",
+      "utc_departure": "2026-05-01T12:00:00.000Z",
+      "utc_arrival": "2026-05-01T18:30:00.000Z",
+      "price": 399.0,
+      "duration": {"departure": 41400, "return": 0, "total": 41400},
+      "route": [
+        {
+          "id": "seg-1",
+          "flyFrom": "JFK",
+          "flyTo": "LHR",
+          "local_departure": "2026-05-01T08:00:00.000Z",
+          "local_arrival": "2026-05-01T19:30:00.000Z",
+          "airline": "BA",
+          "flight_no": 178,
+          "equipment": "744",
+          "fare_classes": "Y"
+        }
+      ],
+      "deep_link": "https://www.kiwi.com/book/kw-offer-1"
+    },
+    {
+      "id": "kw-offer-2",
+      "flyFrom": "JFK",
+      "flyTo": "LHR",
+      "price": 415.0,
+      "duration": {"departure": 47700, "total": 47700},
+      "route": [
+        {
+          "id": "seg-2",
+          "flyFrom": "JFK",
+          "flyTo": "AMS",
+          "local_departure": "2026-05-01T22:00:00.000Z",
+          "local_arrival": "2026-05-02T10:30:00.000Z",
+          "airline": "KL",
+          "flight_no": 644,
+          "equipment": "789"
+        },
+        {
+          "id": "seg-3",
+          "flyFrom": "AMS",
+          "flyTo": "LHR",
+          "local_departure": "2026-05-02T12:00:00.000Z",
+          "local_arrival": "2026-05-02T12:15:00.000Z",
+          "airline": "KL",
+          "flight_no": 1013,
+          "equipment": "E90"
+        }
+      ],
+      "deep_link": "https://www.kiwi.com/book/kw-offer-2"
+    }
+  ]
+}
