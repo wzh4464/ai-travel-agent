@@ -46,8 +46,9 @@ _FLIGHT_INTENT_PATTERN = re.compile(
 # it without us forcing a "Which city will you be flying from?" clarifier.
 _NON_FLIGHT_PATTERN = re.compile(
     r'(\bhotel\w*|\binn\b|\bmotel|\bhostel|\bresort\w*|\bguest\s*house|'
-    r'\baccommodation|\bcheck[- ]?in|\bcheck[- ]?out|\bnight\b|\bb&b\b|'
-    r'酒店|宾馆|住宿|民宿|青年旅社|床位|入住|退房)',
+    r'\baccommodation|\blodging\b|\bairbnb\b|\bstay\b|\broom\b|\bsuite\b|'
+    r'\bcheck[- ]?in|\bcheck[- ]?out|\bb&b\b|'
+    r'酒店|宾馆|旅馆|客栈|住宿|民宿|青年旅社|床位|入住|退房|房间)',
     re.I,
 )
 
@@ -55,19 +56,25 @@ _NON_FLIGHT_PATTERN = re.compile(
 def _looks_like_flight_request(text: str, intent) -> bool:
     """Heuristic gate: only force a flight clarifier when this *seems* like a flight request.
 
-    Treat the request as flight-shaped when the deterministic parser
-    resolved a *routing* slot (origin / destination / region). Date-only
-    matches don't count: "next weekend Tokyo hotel" parses an
-    outbound_date but is plainly not a flight ask.
+    Resolution order:
 
-    A non-flight keyword (hotel/inn/check-in/酒店/民宿/...) always wins,
-    even over a routing slot — "hotels in Europe" has
-    destination_region='europe' but is unambiguously a hotel question.
-
-    Without any routing slot we fall back to scanning the raw text for a
-    flight keyword.
+    1. An explicit flight keyword (``flight``/``fly``/``机票``/...) always
+       wins. ``"flight to Tokyo with hotel"`` is a flight question even
+       though "hotel" also appears.
+    2. Otherwise, a non-flight keyword (``hotel``/``lodging``/``酒店``/...)
+       suppresses the gate. ``"hotels in Europe next weekend"`` parses a
+       ``destination_region`` but is unambiguously a hotel ask.
+    3. Otherwise, a routing slot (origin / destination / region) means the
+       parser is confident enough to treat this as flight-shaped — the
+       open-jaw "去欧洲" path lives here.
+    4. Otherwise, fall back to the flight-keyword scan one more time
+       (already returned False in step 1 if no match — kept here for
+       readability so the four branches read top-to-bottom).
     """
     raw = text or ''
+    has_flight_kw = bool(_FLIGHT_INTENT_PATTERN.search(raw))
+    if has_flight_kw:
+        return True
     if _NON_FLIGHT_PATTERN.search(raw):
         return False
     if any((
@@ -75,7 +82,7 @@ def _looks_like_flight_request(text: str, intent) -> bool:
         intent.destination_code, intent.destination_city, intent.destination_region,
     )):
         return True
-    return bool(_FLIGHT_INTENT_PATTERN.search(raw))
+    return False
 
 
 def _strip_raw(obj: Any) -> Any:
