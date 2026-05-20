@@ -79,11 +79,12 @@ REGION_CJK_ALIASES: dict[str, str] = {
 
 def expand_region(name: str) -> list[str]:
     """Return the canonical IATA list for ``name`` (empty if unknown)."""
+    name = (name or '').strip()
     if not name:
         return []
     if name in REGION_CJK_ALIASES:
         return REGIONS.get(REGION_CJK_ALIASES[name], [])
-    key = name.strip().lower().replace(' ', '_').replace('-', '_')
+    key = name.lower().replace(' ', '_').replace('-', '_')
     if key in REGIONS:
         return REGIONS[key]
     return []

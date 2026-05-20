@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime
+
 from agents.intent.parser import (
     DialogState,
     TravelIntent,
@@ -89,7 +91,14 @@ class TestExtractIntentRegionAndTransit:
     """
 
     def test_full_hong_kong_europe_sentence(self):
-        intent = extract_intent('从香港出发去欧洲 4.23-5.3 要便宜 不要中东中转')
+        # Pin ``today`` so the "4.23-5.3" compact-range resolves to 2026
+        # regardless of when the test is run. Without this, the fuzzy
+        # interpreter rolls the year forward whenever wall-clock today
+        # has already passed 2026-04-23.
+        intent = extract_intent(
+            '从香港出发去欧洲 4.23-5.3 要便宜 不要中东中转',
+            today=datetime.date(2026, 4, 1),
+        )
         assert intent.origin_code == 'HKG'
         # No specific destination city (region query)
         assert intent.destination_code is None

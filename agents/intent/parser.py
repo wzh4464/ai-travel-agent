@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import re
 from dataclasses import asdict, dataclass, field, fields
 from typing import Optional
@@ -103,6 +104,10 @@ def missing_slots(intent: TravelIntent) -> list[str]:
     "Destination" is satisfied by *either* a single city (``destination_code``,
     the normal flights_finder path) or a region (``destination_region``, the
     open-jaw path). The clarifier only asks when both are empty.
+
+    Region-level (open-jaw) searches additionally require a ``return_date``
+    — the open_jaw_search tool needs both directions to rank combinations.
+    Single-city searches do not (a one-way is a valid query).
     """
     missing: list[str] = []
     if not intent.origin_code:
@@ -111,6 +116,13 @@ def missing_slots(intent: TravelIntent) -> list[str]:
         missing.append('destination_code')
     if not intent.outbound_date:
         missing.append('outbound_date')
+    # Open-jaw / region path requires a return date.
+    if (
+        intent.destination_region
+        and not intent.destination_code
+        and not intent.return_date
+    ):
+        missing.append('return_date')
     return missing
 
 
@@ -119,6 +131,7 @@ def clarification_question(slot: str) -> str:
         'origin_code': 'Which city will you be flying from?',
         'destination_code': 'Which city or region would you like to fly to?',
         'outbound_date': 'What date do you want to depart? (e.g. 2026-05-01 or "next weekend")',
+        'return_date': 'What date would you like to return? (e.g. 2026-05-08 or "the following Sunday")',
     }
     return prompts.get(slot, f'Could you clarify: {slot}?')
 
@@ -155,7 +168,21 @@ _TO_ONLY_EN = re.compile(
     rf'(?:\s+(?:{_TERMINATORS})\b|[,.?!]|$)',
     re.I | re.U,
 )
-_FROM_TO_CN = re.compile(r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:到|飞)\s*([\u4e00-\u9fa5A-Za-z ]+?)(?:\s|，|。|$)')
+# CJK terminators mirror _TERMINATORS in spirit: words that should *end* a
+# city-name capture so we don't glue date / cabin / preference markers onto
+# the destination (e.g. "从北京到东京下周一" must capture "东京", not
+# "东京下周一"). Kept as a separate alternation because the CJK regex relies
+# on character-class boundaries rather than \b word boundaries.
+_CN_CITY_TERMINATORS = (
+    r'下周|本周|这周|明天|后天|今天|早上|中午|晚上|'
+    r'直飞|直达|经济|商务|头等|便宜|最便宜|往返|单程|'
+    r'含|带|从|不要|不经|避免|月|号|日'
+)
+_FROM_TO_CN = re.compile(
+    r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:到|飞)\s*'
+    r'([\u4e00-\u9fa5A-Za-z ]+?)'
+    rf'(?=\s|，|。|,|\.|$|{_CN_CITY_TERMINATORS}|\d)'
+)
 # Origin-only CJK: "从香港出发", "从北京动身"
 _FROM_ONLY_CN = re.compile(
     r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:出发|动身|启程|起飞)'
@@ -281,11 +308,19 @@ def _extract_avoid_transit(text: str) -> Optional[list[str]]:
     return ordered or None
 
 
-def extract_intent(text: str) -> TravelIntent:
+def extract_intent(
+    text: str,
+    *,
+    today: Optional[datetime.date] = None,
+) -> TravelIntent:
     """Heuristic extractor that runs *before* the LLM.
 
     The LLM still has the final say — this is just a fast, deterministic
     first pass that populates whatever slots we can be confident about.
+
+    ``today`` is forwarded to the fuzzy-date interpreter so callers (tests
+    in particular) can pin a reference date instead of inheriting the
+    wall-clock. ``None`` keeps the previous behaviour.
     """
     intent = TravelIntent()
     if not text:
@@ -314,7 +349,7 @@ def extract_intent(text: str) -> TravelIntent:
     if avoid:
         intent.avoid_transit = avoid
 
-    fuzzy = interpret_fuzzy_date(text)
+    fuzzy = interpret_fuzzy_date(text, today=today)
     if fuzzy:
         intent.outbound_date = fuzzy.start
         intent.return_date = fuzzy.end

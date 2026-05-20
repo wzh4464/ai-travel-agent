@@ -13,6 +13,7 @@ Duffel or any other upstream provider.
 
 from __future__ import annotations
 
+import datetime
 import uuid
 
 import pytest
@@ -140,7 +141,12 @@ class TestIntentPreflight:
     canonical sentence before the LLM ever runs."""
 
     def test_canonical_sentence(self):
-        intent = extract_intent('从香港出发去欧洲 4.23-5.3 要便宜 不要中东中转')
+        # Pin ``today`` so the "4.23-5.3" compact-range resolves to 2026
+        # regardless of when the test is run.
+        intent = extract_intent(
+            '从香港出发去欧洲 4.23-5.3 要便宜 不要中东中转',
+            today=datetime.date(2026, 4, 1),
+        )
         assert intent.origin_code == 'HKG'
         assert intent.destination_region == 'europe'
         assert intent.outbound_date == '2026-04-23'

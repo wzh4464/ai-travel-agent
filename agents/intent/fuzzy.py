@@ -36,6 +36,27 @@ def _fmt(d: datetime.date) -> str:
     return d.isoformat()
 
 
+def _roll_to_valid_date(
+    start_year: int,
+    month: int,
+    day: int,
+    today: datetime.date,
+    *,
+    max_year: int,
+) -> Optional[datetime.date]:
+    """Construct ``datetime.date(year, month, day)``, advancing the year
+    forward when the combination is invalid (the only realistic case is
+    Feb 29 outside leap years). Gives up once ``year > max_year``.
+    """
+    year = start_year
+    while year <= max_year:
+        try:
+            return datetime.date(year, month, day)
+        except ValueError:
+            year += 1
+    return None
+
+
 def interpret_fuzzy_date(
     text: str,
     *,
@@ -66,13 +87,27 @@ def interpret_fuzzy_date(
     if compact:
         try:
             mo1, d1, mo2, d2 = (int(g) for g in compact.groups())
-            year = today.year
-            start = datetime.date(year, mo1, d1)
+            start = _roll_to_valid_date(today.year, mo1, d1, today, max_year=today.year + 5)
+            if start is None:
+                return None
             if start < today:
-                start = datetime.date(year + 1, mo1, d1)
-            end = datetime.date(start.year, mo2, d2)
+                rolled = _roll_to_valid_date(
+                    start.year + 1, mo1, d1, today, max_year=today.year + 5
+                )
+                if rolled is None:
+                    return None
+                start = rolled
+            end = _roll_to_valid_date(
+                start.year, mo2, d2, today, max_year=today.year + 6
+            )
+            if end is None:
+                return None
             if end < start:
-                end = datetime.date(start.year + 1, mo2, d2)
+                end = _roll_to_valid_date(
+                    end.year + 1, mo2, d2, today, max_year=today.year + 6
+                )
+                if end is None:
+                    return None
             return DateRange(start=_fmt(start), end=_fmt(end))
         except ValueError:
             pass

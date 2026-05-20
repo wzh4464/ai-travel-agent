@@ -168,7 +168,7 @@ class DuffelFlightSource(BaseFlightSource):
         )
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                return json.loads(resp.read())
+                raw = resp.read()
         except urllib.error.HTTPError as exc:
             detail = ''
             try:
@@ -185,3 +185,14 @@ class DuffelFlightSource(BaseFlightSource):
             raise UpstreamAPIError(self.name, status=exc.code, detail=detail) from exc
         except urllib.error.URLError as exc:
             raise UpstreamAPIError(self.name, detail=f'network error: {exc.reason}') from exc
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise UpstreamAPIError(
+                self.name, detail='offer request returned invalid JSON'
+            ) from exc
+        if not isinstance(payload, dict):
+            raise UpstreamAPIError(
+                self.name, detail='offer request returned invalid JSON'
+            )
+        return payload

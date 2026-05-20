@@ -8,9 +8,12 @@ without a live aggregator.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Mapping
 
 from agents.presentation.sorting import _touches_banned_transit
+
+logger = logging.getLogger(__name__)
 
 
 def rank_open_jaw_combinations(
@@ -58,6 +61,7 @@ def rank_open_jaw_combinations(
     prepped_ret = {city: _prep(flights) for city, flights in return_by_city.items()}
 
     combinations: list[dict[str, Any]] = []
+    skipped_currency_mismatch = 0
     for entry_city, outbounds in prepped_out.items():
         if not outbounds:
             continue
@@ -71,18 +75,33 @@ def rank_open_jaw_combinations(
                     for ret in rets
                 ]
             for exit_city, ret in exits:
+                # Currency safety: summing outbound + return only makes
+                # sense when both legs are quoted in the same currency.
+                # SerpAPI/Amadeus normalise to USD but Duffel can return
+                # any ``total_currency``; mixing them would produce a
+                # nonsensical total.
+                ob_ccy = ob.get('currency')
+                ret_ccy = ret.get('currency')
+                if ob_ccy and ret_ccy and ob_ccy != ret_ccy:
+                    skipped_currency_mismatch += 1
+                    continue
                 total = float(ob.get('price') or 0) + float(ret.get('price') or 0)
                 if max_price is not None and total > max_price:
                     continue
                 combinations.append({
                     'total_price': round(total, 2),
-                    'currency': ob.get('currency') or ret.get('currency') or 'USD',
+                    'currency': ob_ccy or ret_ccy or 'USD',
                     'entry_city': entry_city,
                     'exit_city': exit_city,
                     'open_jaw': entry_city != exit_city,
                     'outbound': ob,
                     'return': ret,
                 })
+    if skipped_currency_mismatch:
+        logger.debug(
+            'rank_open_jaw_combinations: skipped %d pair(s) due to currency mismatch',
+            skipped_currency_mismatch,
+        )
 
     combinations.sort(key=lambda c: c['total_price'])
     return combinations[:top_n]
