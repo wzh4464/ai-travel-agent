@@ -62,12 +62,17 @@ def scrub(text: Any) -> str:
 
 
 def scrub_mapping(mapping: dict[str, Any], *, sensitive_keys: Iterable[str] = ()) -> dict[str, Any]:
-    """Return a shallow copy of ``mapping`` with known-sensitive keys and
-    every string value scrubbed.
+    """Return a *recursive* copy of ``mapping`` with sensitive content removed.
 
-    Keys whose name matches ``sensitive_keys`` (case-insensitive) are
-    replaced outright regardless of value type — this handles structured
-    PII like ``{"passport": "..."}`` where the value wouldn't match any
+    Strings are run through :func:`scrub`. Nested ``dict`` values are
+    recursed into with the same ``sensitive_keys`` set. Plain ``list`` /
+    ``tuple`` values are reconstructed element-wise; tuple subclasses
+    pass through untouched.
+
+    Keys whose name matches ``sensitive_keys`` (case-insensitive) — plus a
+    built-in blocklist of credential-shaped names — are replaced outright
+    regardless of value type, which handles structured PII like
+    ``{"passport": "..."}`` where the value alone wouldn't match any
     generic pattern.
     """
     sensitive = {k.lower() for k in sensitive_keys} | {

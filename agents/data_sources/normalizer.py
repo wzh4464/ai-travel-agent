@@ -137,7 +137,10 @@ def normalize_serpapi(raw: dict, provider: str = 'serpapi-google-flights') -> Fl
         stops=stops,
         legs=legs,
         airline_logo=raw.get('airline_logo', ''),
-        booking_url=raw.get('booking_token', '') or 'https://www.google.com/flights',
+        # booking_token is an opaque SerpAPI id, not a clickable URL. Use
+        # the Google Flights homepage so downstream Markdown renderers
+        # don't produce a broken link.
+        booking_url='https://www.google.com/flights',
         provider=provider,
         raw=raw,
     )

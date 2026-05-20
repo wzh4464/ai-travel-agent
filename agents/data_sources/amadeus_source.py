@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -59,6 +60,9 @@ class AmadeusFlightSource(BaseFlightSource):
         self._timeout = timeout
         self._token: str | None = None
         self._token_expires_at: float = 0.0
+        # The aggregator fans search() out across threads; the token cache
+        # must be serialised so two threads don't both POST /oauth2/token.
+        self._token_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # configuration & auth
@@ -68,11 +72,20 @@ class AmadeusFlightSource(BaseFlightSource):
         return bool(self._client_id and self._client_secret)
 
     def _get_token(self) -> str:
+        # Fast path: a cached token wins without acquiring the lock.
         if self._token and time.time() < self._token_expires_at - 30:
             return self._token
         if not self.is_configured():
             raise UpstreamAPIError(self.name, detail='AMADEUS_CLIENT_ID/SECRET not set')
 
+        with self._token_lock:
+            # Double-checked: another thread may have refreshed while we
+            # waited for the lock.
+            if self._token and time.time() < self._token_expires_at - 30:
+                return self._token
+            return self._refresh_token()
+
+    def _refresh_token(self) -> str:
         body = urllib.parse.urlencode(
             {
                 'grant_type': 'client_credentials',

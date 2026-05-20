@@ -8,7 +8,6 @@ tests are gated on HTTP mocks; no test should ever hit a real provider.
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import sys
 
