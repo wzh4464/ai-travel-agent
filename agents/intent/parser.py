@@ -43,24 +43,38 @@ class DialogState:
     clarifications_asked: list[str] = field(default_factory=list)
 
     def merge(self, new: TravelIntent) -> None:
-        """Fill in any fields on the tracked intent that the new turn resolved."""
+        """Overlay slots resolved by ``new`` onto the tracked intent.
+
+        A non-sentinel value from ``new`` always replaces the tracked slot
+        so the user can correct themselves ("actually from SFO" after an
+        earlier "from LAX"). Sentinel / unset values are skipped so a
+        later turn that omits a date does not clobber an earlier one.
+
+        For ``cabin_class`` and ``adults`` the dataclass defaults
+        ('economy' / 1) double as the "user didn't say" sentinel because
+        ``TravelIntent`` cannot carry None for those typed fields. The
+        downside is that a user who explicitly says "actually economy"
+        after picking business cannot heuristically downgrade; the LLM
+        layer is expected to handle that case.
+        """
         for key, value in new.as_dict().items():
-            # max_stops=0 is a real preference (non-stop). Only treat the
-            # field-appropriate sentinel as "unset".
+            # max_stops=0 is a real preference (non-stop); only None is unset.
             if key == 'max_stops':
                 if value is None:
                     continue
             elif key == 'cabin_class':
+                # 'economy' is the dataclass default — treat it as unset so a
+                # later turn that omitted the cabin doesn't clobber an
+                # earlier 'business' choice.
                 if value in (None, '', 'economy'):
+                    continue
+            elif key == 'adults':
+                # 1 is the dataclass default — same reasoning as cabin_class.
+                if not value or value < 1 or value == 1:
                     continue
             elif value in (None, 0, ''):
                 continue
-            current = getattr(self.intent, key)
-            current_unset = current is None or current == '' or (
-                key != 'max_stops' and current == 0
-            ) or (key == 'cabin_class' and current == 'economy')
-            if current_unset:
-                setattr(self.intent, key, value)
+            setattr(self.intent, key, value)
 
 
 REQUIRED_SLOTS = ('origin_code', 'destination_code', 'outbound_date')
@@ -83,8 +97,39 @@ def clarification_question(slot: str) -> str:
 # Heuristic extraction
 # ---------------------------------------------------------------------------
 
-_FROM_TO_EN = re.compile(r'from\s+([\w\s]+?)\s+to\s+([\w\s]+?)(?:\s+on|\s+in|\s+next|\s+this|\s+for|[,.?!]|$)', re.I)
+# Terminator words that should *end* a city-name capture. Without these in
+# the boundary group, "to Tokyo direct on 2026-05-01" would greedily capture
+# "Tokyo direct" as the destination.
+_TERMINATORS = (
+    r'on|in|next|this|for|direct|non-?stop|nonstop|cheap|cheapest|'
+    r'business|economy|first|premium|with|via|by'
+)
+# City body: Unicode-friendly so "São Paulo" / "München" survive intact.
+# One leading letter/digit + any mix of letters, digits, spaces, hyphens,
+# apostrophes. Lazy so the terminator group can fire.
+_CITY_CHARS = r"[^\W_][\w '\-]*?"
+_FROM_TO_EN = re.compile(
+    rf'from\s+({_CITY_CHARS})\s+to\s+({_CITY_CHARS})'
+    rf'(?:\s+(?:{_TERMINATORS})\b|[,.?!]|$)',
+    re.I | re.U,
+)
+# Origin-only follow-ups: "from SFO", "leaving from Beijing tomorrow".
+_FROM_ONLY_EN = re.compile(
+    rf'(?:^|\s)from\s+({_CITY_CHARS})'
+    rf'(?:\s+(?:to|{_TERMINATORS})\b|[,.?!]|$)',
+    re.I | re.U,
+)
+# Destination-only follow-ups: "fly to Tokyo", "heading to LHR".
+_TO_ONLY_EN = re.compile(
+    rf'(?:^|\s)(?:fly|go|travel|head(?:ing)?)\s+to\s+({_CITY_CHARS})'
+    rf'(?:\s+(?:{_TERMINATORS})\b|[,.?!]|$)',
+    re.I | re.U,
+)
 _FROM_TO_CN = re.compile(r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:到|飞)\s*([\u4e00-\u9fa5A-Za-z ]+?)(?:\s|，|。|$)')
+# Origin-only CJK: "从香港出发", "从北京动身"
+_FROM_ONLY_CN = re.compile(
+    r'从\s*([一-龥A-Za-z ]+?)\s*(?:出发|动身|启程|起飞)'
+)
 _ADULTS_EN = re.compile(r'(\d+)\s+(?:adult|passenger|people|pax)', re.I)
 _ADULTS_CN = re.compile(r'(\d+)\s*(?:人|名乘客|位)')
 _CABIN_WORDS = {
@@ -96,27 +141,50 @@ _CABIN_WORDS = {
 
 
 def _extract_pair(text: str) -> tuple[Optional[str], Optional[str]]:
+    # Try the full from→to pair first (either language).
     for pattern in (_FROM_TO_EN, _FROM_TO_CN):
         m = pattern.search(text)
         if m:
             return m.group(1).strip(), m.group(2).strip()
-    return None, None
+    # Fall back to single-side captures. Either or both may resolve in a
+    # single turn ("fly to Tokyo" / "from Beijing next weekend").
+    origin: Optional[str] = None
+    destination: Optional[str] = None
+    m = _FROM_ONLY_EN.search(text) or _FROM_ONLY_CN.search(text)
+    if m:
+        origin = m.group(1).strip()
+    m = _TO_ONLY_EN.search(text)
+    if m:
+        destination = m.group(1).strip()
+    return origin, destination
 
 
-def _extract_cabin(text: str) -> str:
+def _extract_cabin(text: str) -> Optional[str]:
+    """Return the canonical cabin class the user mentioned, or ``None``.
+
+    Returning ``None`` when no cabin word matched is what lets
+    :class:`DialogState.merge` avoid clobbering an earlier 'business'
+    choice with the dataclass default 'economy' on every subsequent turn.
+    """
     s = text.lower()
     for canonical, markers in _CABIN_WORDS.items():
         if any(m in s for m in markers):
             return canonical
-    return 'economy'
+    return None
 
 
-def _extract_pax(text: str) -> int:
+def _extract_pax(text: str) -> Optional[int]:
+    """Return the explicit passenger count the user gave, or ``None``.
+
+    Mirrors :func:`_extract_cabin`: ``None`` means "user didn't say". The
+    dataclass default of ``1`` only applies when no turn ever mentions a
+    count.
+    """
     for pattern in (_ADULTS_EN, _ADULTS_CN):
         m = pattern.search(text)
         if m:
             return int(m.group(1))
-    return 1
+    return None
 
 
 def extract_intent(text: str) -> TravelIntent:
@@ -155,6 +223,10 @@ def extract_intent(text: str) -> TravelIntent:
     if stops is not None:
         intent.max_stops = stops
 
-    intent.cabin_class = _extract_cabin(text)
-    intent.adults = _extract_pax(text)
+    cabin = _extract_cabin(text)
+    if cabin is not None:
+        intent.cabin_class = cabin
+    pax = _extract_pax(text)
+    if pax is not None:
+        intent.adults = pax
     return intent
