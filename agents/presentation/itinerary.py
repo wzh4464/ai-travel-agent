@@ -54,8 +54,18 @@ def rank_open_jaw_combinations(
 
     def _prep(flights: list[dict]) -> list[dict]:
         cleaned = [f for f in flights if not _touches_banned_transit(f, banned)] if banned else list(flights)
-        cleaned.sort(key=lambda f: float(f.get('price') or 10**9))
-        return cleaned[:per_city_candidates]
+        # Bucket by currency so a flood of cheap-looking USD candidates can't
+        # crowd out the only HKD options for a city. Per-currency caps mean
+        # the downstream currency-matching filter still has something to pair
+        # against on the other direction.
+        by_currency: dict[str, list[dict]] = {}
+        for f in cleaned:
+            by_currency.setdefault((f.get('currency') or '').upper(), []).append(f)
+        result: list[dict] = []
+        for ccy_flights in by_currency.values():
+            ccy_flights.sort(key=lambda f: float(f.get('price') or 10**9))
+            result.extend(ccy_flights[:per_city_candidates])
+        return result
 
     prepped_out = {city: _prep(flights) for city, flights in outbound_by_city.items()}
     prepped_ret = {city: _prep(flights) for city, flights in return_by_city.items()}

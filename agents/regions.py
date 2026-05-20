@@ -130,11 +130,12 @@ def expand_transit_blacklist(name: str) -> set[str]:
     Unknown names fall back to ``{name.upper()}`` so callers can pass a
     raw airport code like ``DXB`` directly.
     """
+    name = (name or '').strip()
     if not name:
         return set()
     if name in TRANSIT_CJK_ALIASES:
         return set(TRANSIT_BLACKLISTS[TRANSIT_CJK_ALIASES[name]])
-    key = name.strip().lower().replace(' ', '_').replace('-', '_')
+    key = name.lower().replace(' ', '_').replace('-', '_')
     if key in TRANSIT_BLACKLISTS:
         return set(TRANSIT_BLACKLISTS[key])
-    return {name.strip().upper()}
+    return {name.upper()}
