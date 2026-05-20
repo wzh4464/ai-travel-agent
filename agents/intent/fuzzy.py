@@ -56,12 +56,17 @@ def interpret_fuzzy_date(
     if iso:
         return DateRange(start=iso[0], end=iso[1] if len(iso) > 1 else None)
 
-    if s in ('today', '今天'):
-        return DateRange(start=_fmt(today))
-    if s in ('tomorrow', '明天'):
-        return DateRange(start=_fmt(today + datetime.timedelta(days=1)))
-    if s in ('day after tomorrow', '后天'):
+    # Single-word phrases must match anywhere in the utterance, not just when
+    # the user typed nothing else — "fly to Tokyo tomorrow" should resolve.
+    # English uses word boundaries; CJK doesn't have word breaks so substring
+    # matching is fine. Check the longer "day after tomorrow" first so it wins
+    # over the contained "tomorrow".
+    if re.search(r'\bday after tomorrow\b', s) or '后天' in s:
         return DateRange(start=_fmt(today + datetime.timedelta(days=2)))
+    if re.search(r'\btomorrow\b', s) or '明天' in s:
+        return DateRange(start=_fmt(today + datetime.timedelta(days=1)))
+    if re.search(r'\btoday\b', s) or '今天' in s:
+        return DateRange(start=_fmt(today))
 
     if 'next weekend' in s or '下周末' in s or '下个周末' in s:
         days_to_sat = (5 - today.weekday()) % 7 or 7

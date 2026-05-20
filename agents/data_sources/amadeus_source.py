@@ -170,7 +170,14 @@ class AmadeusFlightSource(BaseFlightSource):
         carriers = ((data.get('dictionaries') or {}).get('carriers') or {})
         if not offers:
             raise NoResultsError(origin, destination, outbound_date)
-        return [normalize_amadeus(o, carriers, provider=self.name).to_dict() for o in offers]
+        results = [normalize_amadeus(o, carriers, provider=self.name).to_dict() for o in offers]
+        # Amadeus only honours ``nonStop=true`` (max_stops=0). For 1+ stop
+        # caps we must post-filter so the aggregator's contract is preserved.
+        if max_stops is not None and max_stops > 0:
+            results = [f for f in results if (f.get('stops') or 0) <= max_stops]
+        if not results:
+            raise NoResultsError(origin, destination, outbound_date)
+        return results
 
     @with_retries()
     def details(self, flight_id: str) -> dict:

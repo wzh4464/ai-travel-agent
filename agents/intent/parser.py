@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field
 from typing import Optional
 
 from agents.intent.fuzzy import (
@@ -24,36 +24,18 @@ class TravelIntent:
     destination_code: Optional[str] = None
     outbound_date: Optional[str] = None
     return_date: Optional[str] = None
-    adults: int = 1
-    children: int = 0
-    cabin_class: str = 'economy'
+    # adults / cabin_class are Optional so the dialog can distinguish "user
+    # didn't say" from "user said 1 / economy". Tool-call construction layers
+    # apply the actual booking defaults via ``intent.adults or 1`` etc.
+    adults: Optional[int] = None
+    children: Optional[int] = None
+    cabin_class: Optional[str] = None
     max_stops: Optional[int] = None
     max_price: Optional[float] = None
     sort_by: Optional[str] = None
 
     def as_dict(self) -> dict:
         return asdict(self)
-
-
-# Slots whose dataclass default doubles as the "user didn't say" sentinel.
-# Sourced from TravelIntent so the two definitions can never drift.
-# max_stops is *excluded*: its default is None already, and 0 (non-stop) is a
-# real user preference that must not be treated as "empty".
-_UNSET_BY_DEFAULT = frozenset({'cabin_class', 'adults', 'children'})
-_DEFAULTS = {
-    f.name: f.default
-    for f in fields(TravelIntent)
-    if f.name in _UNSET_BY_DEFAULT
-}
-
-
-def _is_unset(key: str, value) -> bool:
-    """Return True when a slot value should be treated as 'not yet provided'."""
-    if value is None or value == '':
-        return True
-    if key in _DEFAULTS and value == _DEFAULTS[key]:
-        return True
-    return False
 
 
 @dataclass
@@ -64,19 +46,25 @@ class DialogState:
     clarifications_asked: list[str] = field(default_factory=list)
 
     def merge(self, new: TravelIntent) -> None:
-        """Fill in any fields on the tracked intent that the new turn resolved.
+        """Overlay slots resolved by ``new`` onto the tracked intent.
 
-        A value from ``new`` replaces the tracked value only when the
-        tracked slot is still unset. This preserves earlier turns: if the
-        user said "2026-05-01" on turn 1, a later turn that omits a date
-        will not clobber it.
+        A non-sentinel value from ``new`` always replaces the tracked slot
+        so the user can correct themselves — "actually from SFO" after an
+        earlier "from LAX", "actually economy" after "business", or
+        "actually 1 adult" after "3 adults".
+
+        Sentinel / unset values are skipped so a later turn that omits a
+        date does not clobber an earlier one. ``max_stops=0`` is a real
+        preference (non-stop), so its only sentinel is ``None``; every
+        other field treats ``None`` and ``''`` as unset.
         """
         for key, value in new.as_dict().items():
-            if _is_unset(key, value):
+            if key == 'max_stops':
+                if value is None:
+                    continue
+            elif value in (None, ''):
                 continue
-            current = getattr(self.intent, key)
-            if _is_unset(key, current):
-                setattr(self.intent, key, value)
+            setattr(self.intent, key, value)
 
 
 REQUIRED_SLOTS = ('origin_code', 'destination_code', 'outbound_date')
@@ -99,48 +87,54 @@ def clarification_question(slot: str) -> str:
 # Heuristic extraction
 # ---------------------------------------------------------------------------
 
-# The terminator clause lists every word that should *end* a city name
-# capture. Anything placed here will not be accidentally glued onto the city,
-# e.g. "to Tokyo direct on 2026-05-01" would otherwise capture "Tokyo direct".
+# Terminator words that should *end* a city-name capture. Without these in
+# the boundary group, "to Tokyo direct on 2026-05-01" would greedily capture
+# "Tokyo direct" as the destination.
 _TERMINATORS = (
     r'on|in|next|this|for|direct|non-?stop|nonstop|cheap|cheapest|'
     r'business|economy|first|premium|with|via|by'
 )
-# City body: Unicode letters (covers accented Latin like São Paulo / München),
-# spaces, hyphens, apostrophes, and digits (for terminal codes like "T3").
-# Excludes the terminator words via the boundary group that follows.
+# City body: Unicode-friendly so "São Paulo" / "München" survive intact.
+# One leading letter/digit + any mix of letters, digits, spaces, hyphens,
+# apostrophes. Lazy so the terminator group can fire.
 _CITY_CHARS = r"[^\W_][\w '\-]*?"
 _FROM_TO_EN = re.compile(
     rf'from\s+({_CITY_CHARS})\s+to\s+({_CITY_CHARS})'
     rf'(?:\s+(?:{_TERMINATORS})\b|[,.?!]|$)',
     re.I | re.U,
 )
-# Origin-only: "from Beijing next weekend", "leaving from SFO tomorrow".
+# Origin-only follow-ups: "from SFO", "leaving from Beijing tomorrow".
 _FROM_ONLY_EN = re.compile(
     rf'(?:^|\s)from\s+({_CITY_CHARS})'
     rf'(?:\s+(?:to|{_TERMINATORS})\b|[,.?!]|$)',
     re.I | re.U,
 )
-# Destination-only: "fly to Tokyo", "heading to LHR", "I want to go to Paris".
+# Destination-only follow-ups: "fly to Tokyo", "heading to LHR".
 _TO_ONLY_EN = re.compile(
     rf'(?:^|\s)(?:fly|go|travel|head(?:ing)?)\s+to\s+({_CITY_CHARS})'
     rf'(?:\s+(?:{_TERMINATORS})\b|[,.?!]|$)',
     re.I | re.U,
 )
-# CJK terminators mirror _TERMINATORS in spirit: words that should *end* a
-# city-name capture so we don't glue date / cabin / preference markers onto
-# the destination (e.g. "从北京到东京下周一" must capture "东京", not
-# "东京下周一"). Kept as a separate alternation because the CJK regex relies
-# on character-class boundaries rather than \b word boundaries.
+# CJK terminators mirror _TERMINATORS: words that should *end* a city-name
+# capture so we don't glue date / cabin / preference markers onto the
+# destination ("从北京到东京下周一" must capture "东京", not "东京下周一").
+# Includes the origin-only verbs (出发/动身/启程/起飞) so the from→to regex
+# stops cleanly before "从X出发" — and the single-side _FROM_ONLY_CN below
+# can capture an origin without those verbs polluting it.
 _CN_CITY_TERMINATORS = (
     r'下周|本周|这周|明天|后天|今天|早上|中午|晚上|'
     r'直飞|直达|经济|商务|头等|便宜|最便宜|往返|单程|'
-    r'含|带|从|不要|不经|避免|月|号|日'
+    r'含|带|从|不要|不经|避免|月|号|日|'
+    r'出发|动身|启程|起飞'
 )
 _FROM_TO_CN = re.compile(
     r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:到|飞)\s*'
     r'([\u4e00-\u9fa5A-Za-z ]+?)'
     rf'(?=\s|，|。|,|\.|$|{_CN_CITY_TERMINATORS}|\d)'
+)
+# Origin-only CJK: "从香港出发", "从北京动身".
+_FROM_ONLY_CN = re.compile(
+    r'从\s*([\u4e00-\u9fa5A-Za-z ]+?)\s*(?:出发|动身|启程|起飞)'
 )
 _ADULTS_EN = re.compile(r'(\d+)\s+(?:adult|passenger|people|pax)', re.I)
 _ADULTS_CN = re.compile(r'(\d+)\s*(?:人|名乘客|位)')
@@ -153,16 +147,16 @@ _CABIN_WORDS = {
 
 
 def _extract_pair(text: str) -> tuple[Optional[str], Optional[str]]:
-    # First try the full from→to pair (either language).
+    # Try the full from→to pair first (either language).
     for pattern in (_FROM_TO_EN, _FROM_TO_CN):
         m = pattern.search(text)
         if m:
             return m.group(1).strip(), m.group(2).strip()
-    # Fall back to "from X" and "to X" in isolation. Either or both may
-    # match a single turn ("fly to Tokyo" / "from Beijing next weekend").
+    # Fall back to single-side captures. Either or both may resolve in a
+    # single turn ("fly to Tokyo" / "from Beijing next weekend").
     origin: Optional[str] = None
     destination: Optional[str] = None
-    m = _FROM_ONLY_EN.search(text)
+    m = _FROM_ONLY_EN.search(text) or _FROM_ONLY_CN.search(text)
     if m:
         origin = m.group(1).strip()
     m = _TO_ONLY_EN.search(text)
@@ -171,20 +165,32 @@ def _extract_pair(text: str) -> tuple[Optional[str], Optional[str]]:
     return origin, destination
 
 
-def _extract_cabin(text: str) -> str:
+def _extract_cabin(text: str) -> Optional[str]:
+    """Return the canonical cabin class the user mentioned, or ``None``.
+
+    Returning ``None`` when no cabin word matched is what lets
+    :class:`DialogState.merge` avoid clobbering an earlier 'business'
+    choice with the dataclass default 'economy' on every subsequent turn.
+    """
     s = text.lower()
     for canonical, markers in _CABIN_WORDS.items():
         if any(m in s for m in markers):
             return canonical
-    return 'economy'
+    return None
 
 
-def _extract_pax(text: str) -> int:
+def _extract_pax(text: str) -> Optional[int]:
+    """Return the explicit passenger count the user gave, or ``None``.
+
+    Mirrors :func:`_extract_cabin`: ``None`` means "user didn't say". The
+    dataclass default of ``1`` only applies when no turn ever mentions a
+    count.
+    """
     for pattern in (_ADULTS_EN, _ADULTS_CN):
         m = pattern.search(text)
         if m:
             return int(m.group(1))
-    return 1
+    return None
 
 
 def extract_intent(text: str) -> TravelIntent:
@@ -223,6 +229,10 @@ def extract_intent(text: str) -> TravelIntent:
     if stops is not None:
         intent.max_stops = stops
 
-    intent.cabin_class = _extract_cabin(text)
-    intent.adults = _extract_pax(text)
+    cabin = _extract_cabin(text)
+    if cabin is not None:
+        intent.cabin_class = cabin
+    pax = _extract_pax(text)
+    if pax is not None:
+        intent.adults = pax
     return intent
